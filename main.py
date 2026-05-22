@@ -273,7 +273,7 @@ def get_tasks(session: str = Depends(require_auth)):
         last = conn.execute(
             """SELECT content FROM comments WHERE task_id=?
                AND content LIKE '🚧 [BLOQUÉ%'
-               ORDER BY created_at DESC LIMIT 1""", (tid,)
+               ORDER BY created_at DESC, id DESC LIMIT 1""", (tid,)
         ).fetchone()
         if last:
             m = re.search(r"Cause : (.+)$", last["content"])

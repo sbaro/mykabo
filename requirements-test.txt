@@ -1,0 +1,4 @@
+# Test-only dependencies — not needed in production
+pytest>=8.2
+httpx>=0.27          # required by starlette's TestClient
+anyio[trio]>=4.4     # async backend for httpx/starlette tests

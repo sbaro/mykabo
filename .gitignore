@@ -2,3 +2,8 @@ kanban_data
 .DS_Store
 secrets.env
 .claude
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/node_modules/

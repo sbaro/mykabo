@@ -170,10 +170,52 @@
   .login-remember{display:flex;align-items:center;gap:8px;font-size:.85rem;color:var(--muted);margin-bottom:16px;}
   .login-remember input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
   .login-remember label{cursor:pointer;user-select:none;}
+  /* ── Filter bar ────────────────────────────────────────────────────────── */
+  .filter-bar{background:#fff;border-bottom:1px solid #e4e4e7;padding:9px 24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:56px;z-index:90;min-height:50px;}
+  .filter-bar.hidden{display:none;}
+  .filter-group{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .filter-label{font-size:.68rem;font-weight:700;letter-spacing:.85px;text-transform:uppercase;color:var(--muted);margin-right:3px;user-select:none;display:inline-flex;align-items:center;gap:4px;}
+  .filter-chip{background:#f4f4f5;border:1.5px solid transparent;border-radius:99px;padding:4px 11px;font-size:.78rem;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:background .12s,color .12s,border-color .12s,transform .08s;color:#3f3f46;white-space:nowrap;user-select:none;font-family:var(--font);}
+  .filter-chip:hover{background:#e4e4e7;}
+  .filter-chip:active{transform:scale(.96);}
+  .filter-chip .chip-count{font-size:.68rem;opacity:.55;font-weight:600;font-variant-numeric:tabular-nums;}
+  .filter-bar.no-counts .chip-count{display:none;}
+  .filter-chip.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .filter-chip.active .chip-count{opacity:.85;color:rgba(255,255,255,.9);}
+  .filter-chip.prio-high{background:#fecaca;color:#991b1b;}
+  .filter-chip.prio-normal{background:#e0e7ff;color:#3730a3;}
+  .filter-chip.prio-low{background:#dcfce7;color:#166534;}
+  .filter-chip.prio-high.active{background:#dc2626;color:#fff;border-color:#dc2626;}
+  .filter-chip.prio-normal.active{background:#6366f1;color:#fff;border-color:#6366f1;}
+  .filter-chip.prio-low.active{background:#16a34a;color:#fff;border-color:#16a34a;}
+  .filter-divider{width:1px;height:22px;background:#e4e4e7;flex-shrink:0;}
+  .filter-status{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:.78rem;color:var(--muted);}
+  .filter-status .matches{font-variant-numeric:tabular-nums;}
+  .filter-status .matches strong{color:var(--text);font-weight:700;}
+  .filter-clear{background:none;border:none;cursor:pointer;color:var(--accent);font-weight:600;font-size:.78rem;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;font-family:var(--font);}
+  .filter-clear:hover{background:rgba(99,102,241,.08);}
+  .filter-clear[disabled]{opacity:0;pointer-events:none;}
+  .filter-empty-cat{font-size:.75rem;color:var(--muted);font-style:italic;}
+  /* Compact style: collapses to a single button until expanded */
+  .filter-bar.style-compact:not(.expanded) .filter-group,
+  .filter-bar.style-compact:not(.expanded) .filter-divider{display:none;}
+  .filter-bar.style-compact .filter-toggle{display:inline-flex;}
+  .filter-bar:not(.style-compact) .filter-toggle{display:none;}
+  .filter-toggle{background:#f4f4f5;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.8rem;color:var(--text);font-weight:500;align-items:center;gap:7px;font-family:var(--font);}
+  .filter-toggle:hover{background:#e4e4e7;}
+  .filter-toggle .filter-badge{background:var(--accent);color:#fff;border-radius:99px;font-size:.66rem;font-weight:700;padding:1px 7px;min-width:18px;text-align:center;line-height:1.4;}
+  .filter-toggle .filter-badge.empty{display:none;}
+  .filter-bar.style-compact.expanded .filter-toggle{background:var(--accent);color:#fff;}
+  .filter-bar.style-compact.expanded .filter-toggle .filter-badge{background:rgba(255,255,255,.25);}
+  /* Dim mode: non-matching cards faded instead of hidden */
+  .card.filtered-out,.stack-wrapper.filtered-out{opacity:.18;filter:grayscale(.8);}
+  .col-empty-filter{text-align:center;padding:14px 8px;font-size:.72rem;color:var(--muted);font-style:italic;opacity:.55;}
   @media(max-width:600px){
     .board{padding:12px;gap:12px;}.column{min-width:240px;width:240px;}
     header h1{font-size:1rem;}.side-drawer{max-width:100%;}
     .multi-toolbar{flex-wrap:wrap;justify-content:center;bottom:12px;width:calc(100% - 24px);}
+    .filter-bar{padding:8px 12px;gap:8px;top:54px;}
+    .filter-status{margin-left:0;width:100%;justify-content:space-between;}
   }
 </style>
 </head>
@@ -222,6 +264,25 @@
     <div class="login-error" id="login-error"></div>
     <div class="login-remember"><input type="checkbox" id="l-remember"/><label for="l-remember">Se souvenir de moi (30 jours)</label></div>
     <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Se connecter</button>
+  </div>
+</div>
+
+<!-- Filter bar -->
+<div class="filter-bar hidden style-compact" id="filter-bar">
+  <button class="filter-toggle" id="filter-toggle-btn" onclick="toggleFilterExpanded()" type="button">
+    <span>🔍 Filtres</span>
+    <span class="filter-badge empty" id="filter-toggle-badge">0</span>
+  </button>
+  <div class="filter-group" id="filter-priority-group">
+    <span class="filter-label">⚡ Priorité</span>
+  </div>
+  <div class="filter-divider"></div>
+  <div class="filter-group" id="filter-category-group">
+    <span class="filter-label">🏷️ Catégorie</span>
+  </div>
+  <div class="filter-status">
+    <span class="matches" id="filter-matches"></span>
+    <button class="filter-clear" id="filter-clear-btn" onclick="clearAllFilters()" type="button" disabled>↺ Tout effacer</button>
   </div>
 </div>
 
@@ -326,6 +387,12 @@ let browsingStackId=null;
 let stackHoverTarget=null;
 let stackDropTarget=null;   // mirrors stackHoverTarget but is NEVER cleared by dragleave
 
+// ── FILTER STATE ──────────────────────────────────────────────────────────────────
+let activeFilters = { priority: new Set(), category: new Set() };
+const LOGIC_MODE = "and";   // "and" | "or" — logic between priority and category groups
+const FILTER_MODE = "dim";  // "hide" | "dim"  — non-matching cards are faded vs removed
+const PRIORITIES = [{id:"high",label:"Haute"},{id:"normal",label:"Normale"},{id:"low",label:"Basse"}];
+
 document.getElementById("today").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -376,10 +443,12 @@ const api={
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
+  document.getElementById("filter-bar").classList.add("hidden");
   ["logout-btn","archive-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
+  document.getElementById("filter-bar").classList.remove("hidden");
   ["logout-btn","archive-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
 }
 async function doLogin(){
@@ -593,12 +662,17 @@ function countStack(stackId){return Object.values(tasks).flat().filter(t=>t.stac
 function renderBoard(){
   const board=document.getElementById("board"); board.innerHTML="";
   if(selectMode)board.classList.add("select-mode");
+  const filterActive=activeFilters.priority.size+activeFilters.category.size>0;
+  const dimMode=FILTER_MODE==="dim";
   COLS.forEach(col=>{
     const allItems=tasks[col.id]||[];
-    const items=getStackRepresentatives(allItems);
+    const reps=getStackRepresentatives(allItems);
+    const visibleReps=(filterActive&&!dimMode)?reps.filter(t=>taskOrStackMatches(t)):reps;
     const el=document.createElement("div"); el.className=`column col-${col.id}`;
+    const matchCount=filterActive?reps.filter(t=>taskOrStackMatches(t)).length:allItems.length;
+    const badge=filterActive?`${matchCount}/${allItems.length}`:`${allItems.length}`;
     el.innerHTML=`
-      <div class="col-header">${col.label}<span class="badge">${allItems.length}</span></div>
+      <div class="col-header">${col.label}<span class="badge">${badge}</span></div>
       <div class="col-body" id="col-${col.id}" data-col="${col.id}"></div>
       ${ARCHIVABLE.includes(col.id)&&allItems.length>0?`<button class="archive-all-btn" onclick="archiveAll('${col.id}')">🗄️ Tout archiver (${allItems.length})</button>`:""}
       ${col.id==="backlog"?`<button class="add-task-btn" onclick="openNew()">+ Ajouter une tâche</button>`:""}
@@ -606,9 +680,106 @@ function renderBoard(){
     board.appendChild(el);
     const body=el.querySelector(".col-body");
     const lead=document.createElement("div"); lead.className="drop-indicator"; body.appendChild(lead);
-    items.forEach(t=>{body.appendChild(t.stack_id ? makeStackCard(t,col.id) : makeCard(t,col.id));});
+    visibleReps.forEach(t=>{
+      const frag = t.stack_id ? makeStackCard(t,col.id) : makeCard(t,col.id);
+      if(filterActive&&dimMode&&!taskOrStackMatches(t)){
+        const wrapper=frag.querySelector(".stack-wrapper");
+        if(wrapper)wrapper.classList.add("filtered-out");
+        else{const c=frag.querySelector(".card"); if(c)c.classList.add("filtered-out");}
+      }
+      body.appendChild(frag);
+    });
+    if(filterActive&&!dimMode&&visibleReps.length===0&&allItems.length>0){
+      const empty=document.createElement("div"); empty.className="col-empty-filter";
+      const n=allItems.length; empty.textContent=`Aucune correspondance · ${n} masquée${n>1?"s":""}`;
+      body.appendChild(empty);
+    }
     setupColDrop(body,col.id);
   });
+  refreshFilterBar();
+}
+
+// ── FILTERING ─────────────────────────────────────────────────────────────────
+function matchesFilters(t){
+  const prioActive=activeFilters.priority.size>0;
+  const catActive=activeFilters.category.size>0;
+  if(!prioActive&&!catActive)return true;
+  const prioOk=!prioActive||activeFilters.priority.has(t.priority);
+  const catOk=!catActive||(t.category&&activeFilters.category.has(t.category));
+  if(LOGIC_MODE==="and")return prioOk&&catOk;
+  return (prioActive&&prioOk)||(catActive&&catOk);
+}
+function taskOrStackMatches(t){
+  if(!t.stack_id)return matchesFilters(t);
+  return Object.values(tasks).flat().some(x=>x.stack_id===t.stack_id&&matchesFilters(x));
+}
+function toggleFilter(group,value){
+  if(activeFilters[group].has(value))activeFilters[group].delete(value);
+  else activeFilters[group].add(value);
+  renderBoard();
+}
+function clearAllFilters(){
+  if(activeFilters.priority.size===0&&activeFilters.category.size===0)return;
+  activeFilters.priority.clear(); activeFilters.category.clear();
+  renderBoard();
+}
+function toggleFilterExpanded(){
+  document.getElementById("filter-bar").classList.toggle("expanded");
+}
+function refreshFilterBar(){
+  const all=Object.values(tasks).flat();
+  const prioCount={high:0,normal:0,low:0};
+  const catCount=new Map();
+  all.forEach(t=>{
+    if(t.priority)prioCount[t.priority]=(prioCount[t.priority]||0)+1;
+    if(t.category)catCount.set(t.category,(catCount.get(t.category)||0)+1);
+  });
+  // Priority chips
+  const pGroup=document.getElementById("filter-priority-group");
+  pGroup.innerHTML=`<span class="filter-label">⚡ Priorité</span>`;
+  PRIORITIES.forEach(p=>{
+    const chip=document.createElement("button"); chip.type="button";
+    chip.className=`filter-chip prio-${p.id}${activeFilters.priority.has(p.id)?" active":""}`;
+    chip.innerHTML=`${p.label}<span class="chip-count">${prioCount[p.id]||0}</span>`;
+    chip.onclick=()=>toggleFilter("priority",p.id);
+    pGroup.appendChild(chip);
+  });
+  // Category chips (sorted by count desc, then alpha)
+  const cGroup=document.getElementById("filter-category-group");
+  cGroup.innerHTML=`<span class="filter-label">🏷️ Catégorie</span>`;
+  const sortedCats=[...catCount.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+  if(sortedCats.length===0){
+    const empty=document.createElement("span"); empty.className="filter-empty-cat"; empty.textContent="— Aucune";
+    cGroup.appendChild(empty);
+  }else{
+    sortedCats.forEach(([cat,count])=>{
+      const chip=document.createElement("button"); chip.type="button";
+      chip.className="filter-chip"+(activeFilters.category.has(cat)?" active":"");
+      chip.innerHTML=`${esc(cat)}<span class="chip-count">${count}</span>`;
+      chip.onclick=()=>toggleFilter("category",cat);
+      cGroup.appendChild(chip);
+    });
+  }
+  // Status
+  const totalActive=activeFilters.priority.size+activeFilters.category.size;
+  document.getElementById("filter-clear-btn").disabled=totalActive===0;
+  const badge=document.getElementById("filter-toggle-badge");
+  badge.textContent=totalActive; badge.classList.toggle("empty",totalActive===0);
+  // Auto-expand compact bar when filters are applied; collapse when cleared
+  const bar=document.getElementById("filter-bar");
+  if(bar.classList.contains("style-compact")){
+    if(totalActive>0)bar.classList.add("expanded");
+    else bar.classList.remove("expanded");
+  }
+  // Match count
+  const visible=all.filter(t=>matchesFilters(t)).length;
+  const total=all.length;
+  const matchesEl=document.getElementById("filter-matches");
+  if(totalActive>0){
+    matchesEl.innerHTML=`<strong>${visible}</strong> sur ${total} tâche${total>1?"s":""}`;
+  }else{
+    matchesEl.innerHTML=`<strong>${total}</strong> tâche${total>1?"s":""}`;
+  }
 }
 
 // ── DRAG & DROP ───────────────────────────────────────────────────────────────

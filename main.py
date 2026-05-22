@@ -394,10 +394,16 @@ def create_stack(body: StackCreate, session: str = Depends(require_auth)):
         ).fetchone()
         if not row or row["archived"]:
             conn.close(); raise HTTPException(404, f"Task {tid} not found or archived")
+    # All tasks in a stack must share the same column (the representative's column).
+    # This ensures that unstacking puts every task back in the right column,
+    # even when the pile was created by dragging across columns.
+    target_col = conn.execute(
+        "SELECT column FROM tasks WHERE id=?", (body.task_ids[0],)
+    ).fetchone()["column"]
     sid = secrets.token_urlsafe(8)
     for i, tid in enumerate(body.task_ids):
-        conn.execute("UPDATE tasks SET stack_id=?, stack_pos=? WHERE id=?",
-                     (sid, i, tid))
+        conn.execute("UPDATE tasks SET stack_id=?, stack_pos=?, column=? WHERE id=?",
+                     (sid, i, target_col, tid))
     conn.commit()
     rows = conn.execute(
         "SELECT * FROM tasks WHERE stack_id=? ORDER BY stack_pos", (sid,)

@@ -429,21 +429,41 @@ async function stackTwoTasks(targetId,droppedId){
   const dropped=allTasks.find(t=>t.id===droppedId);
   if(!target||!dropped)return;
   if(target.stack_id&&dropped.stack_id&&target.stack_id===dropped.stack_id)return;
+  const dateStr=new Date().toLocaleString("fr-FR");
   try{
     if(target.stack_id){
+      // Adding dropped task to an existing stack — target's column wins.
       const sd=await api.get(`/api/stacks/${target.stack_id}`);
       const existingIds=sd.tasks.map(t=>t.id).filter(id=>id!==droppedId);
       await api.del(`/api/stacks/${target.stack_id}`);
-      await api.post("/api/stacks",{task_ids:[...existingIds,droppedId]});
+      const res=await api.post("/api/stacks",{task_ids:[...existingIds,droppedId]});
+      if(target.column==="blocked"&&dropped.column!=="blocked")
+        // Single task newly blocked: open modal so user can give a reason.
+        // pendingStack lets cancelBlock dissolve the pile if user cancels.
+        openBlockModal(droppedId,dropped.column,res.stack_id);
+      else await loadBoard();
     }else if(dropped.stack_id){
+      // Adding target to dropped's existing stack — target's column wins.
       const sd=await api.get(`/api/stacks/${dropped.stack_id}`);
       const existingIds=sd.tasks.map(t=>t.id).filter(id=>id!==targetId);
       await api.del(`/api/stacks/${dropped.stack_id}`);
       await api.post("/api/stacks",{task_ids:[targetId,...existingIds]});
+      if(target.column==="blocked"){
+        // All previously non-blocked tasks in the dropped stack are now blocked.
+        // Multiple tasks → auto-comment (same behaviour as moving a whole pile to Blocked).
+        const newlyBlocked=sd.tasks.filter(t=>t.column!=="blocked");
+        await Promise.all(newlyBlocked.map(t=>
+          api.post(`/api/tasks/${t.id}/comments`,
+            {content:`🚧 [BLOQUÉ le ${dateStr}] — Pile déplacée vers Blocked`}).catch(()=>{})));
+      }
+      await loadBoard();
     }else{
-      await api.post("/api/stacks",{task_ids:[targetId,droppedId]});
+      // Simple two-task pile creation.
+      const res=await api.post("/api/stacks",{task_ids:[targetId,droppedId]});
+      if(target.column==="blocked"&&dropped.column!=="blocked")
+        openBlockModal(droppedId,dropped.column,res.stack_id);
+      else await loadBoard();
     }
-    await loadBoard();
   }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'empilement.",true);}
 }
 
@@ -502,15 +522,25 @@ async function unstackDirect(stackId){
 }
 
 // ── BLOCK FLOW ────────────────────────────────────────────────────────────────
-function openBlockModal(taskId,previousCol){
-  pendingBlock={taskId,previousCol};
+function openBlockModal(taskId,previousCol,stackId=null){
+  pendingBlock={taskId,previousCol,stackId};
   document.getElementById("block-reason").value="";
   document.getElementById("block-overlay").classList.add("open");
   setTimeout(()=>document.getElementById("block-reason").focus(),50);
 }
 function cancelBlock(){
   document.getElementById("block-overlay").classList.remove("open");
-  if(pendingBlock)api.patch(`/api/tasks/${pendingBlock.taskId}`,{column:pendingBlock.previousCol}).then(loadBoard).catch(()=>{});
+  if(pendingBlock){
+    const{taskId,previousCol,stackId}=pendingBlock;
+    if(stackId){
+      // Pile créée par drag inter-colonne : la dissoudre et laisser la tâche
+      // retourner dans sa colonne d'origine (column est mis à jour par unstack).
+      api.del(`/api/stacks/${stackId}`).then(()=>
+        api.patch(`/api/tasks/${taskId}`,{column:previousCol})).then(loadBoard).catch(()=>{});
+    }else{
+      api.patch(`/api/tasks/${taskId}`,{column:previousCol}).then(loadBoard).catch(()=>{});
+    }
+  }
   pendingBlock=null;
 }
 async function confirmBlock(){

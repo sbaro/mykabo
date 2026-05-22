@@ -3,7 +3,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import sqlite3, os, secrets, time, re, calendar
+import sqlite3
+import os
+import secrets
+import time
+import re
+import calendar
 from datetime import datetime, timezone, date, timedelta
 
 try:
@@ -13,7 +18,8 @@ try:
     def verify_pass(p: str, h: str) -> bool: return pwd_ctx.verify(p, h)
 except ImportError:
     # Fallback if passlib not installed — still salted via hmac
-    import hashlib, hmac
+    import hashlib
+    import hmac
     _SALT = os.environ.get("PASSWORD_SALT", secrets.token_hex(16))
     def hash_pass(p: str) -> str:
         return hmac.new(_SALT.encode(), p.encode(), hashlib.sha256).hexdigest()
@@ -355,7 +361,8 @@ def get_task(task_id: int, session: str = Depends(require_auth)):
     conn = get_db()
     row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     if not row:
-        conn.close(); raise HTTPException(404, "Task not found")
+        conn.close()
+        raise HTTPException(404, "Task not found")
     d = row_to_dict(row)
     d["comments"] = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM comments WHERE task_id=? ORDER BY created_at", (task_id,)
@@ -367,7 +374,8 @@ def get_task(task_id: int, session: str = Depends(require_auth)):
 def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require_auth)):
     conn = get_db()
     if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
-        conn.close(); raise HTTPException(404, "Task not found")
+        conn.close()
+        raise HTTPException(404, "Task not found")
     fields = {k: v for k, v in update.model_dump().items()
               if v is not None and k in _TASK_WRITABLE}
     if "category" in fields:
@@ -387,7 +395,8 @@ def archive_task(task_id: int, session: str = Depends(require_auth)):
     conn = get_db()
     task_row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     if not task_row:
-        conn.close(); raise HTTPException(404, "Task not found")
+        conn.close()
+        raise HTTPException(404, "Task not found")
     task_data = row_to_dict(task_row)
     sid = task_data.get("stack_id")
     conn.execute(
@@ -428,11 +437,13 @@ def archive_task(task_id: int, session: str = Depends(require_auth)):
 def unarchive_task(task_id: int, session: str = Depends(require_auth)):
     conn = get_db()
     if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
-        conn.close(); raise HTTPException(404, "Task not found")
+        conn.close()
+        raise HTTPException(404, "Task not found")
     conn.execute(
         "UPDATE tasks SET archived=0, archived_at=NULL WHERE id=?", (task_id,)
     )
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 @app.delete("/api/tasks/{task_id}", status_code=204)
@@ -450,7 +461,8 @@ def delete_task(task_id: int, session: str = Depends(require_auth)):
             for r in remaining:
                 conn.execute("UPDATE tasks SET stack_id=NULL, stack_pos=0 WHERE id=?", (r["id"],))
     conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 # ─── WIP LIMITS ───────────────────────────────────────────────────────────────
 @app.get("/api/wip_limits")
@@ -565,11 +577,13 @@ def add_comment(task_id: int, comment: CommentCreate,
                 session: str = Depends(require_auth)):
     conn = get_db()
     if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
-        conn.close(); raise HTTPException(404, "Task not found")
+        conn.close()
+        raise HTTPException(404, "Task not found")
     c = conn.cursor()
     c.execute("INSERT INTO comments (task_id, content) VALUES (?,?)",
               (task_id, comment.content))
-    cid = c.lastrowid; conn.commit()
+    cid = c.lastrowid
+    conn.commit()
     row = conn.execute("SELECT * FROM comments WHERE id=?", (cid,)).fetchone()
     conn.close()
     return row_to_dict(row)
@@ -580,7 +594,8 @@ def delete_comment(task_id: int, comment_id: int,
     conn = get_db()
     conn.execute("DELETE FROM comments WHERE id=? AND task_id=?",
                  (comment_id, task_id))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 # ─── STACKS ───────────────────────────────────────────────────────────────────
 @app.post("/api/stacks", status_code=201)
@@ -593,7 +608,8 @@ def create_stack(body: StackCreate, session: str = Depends(require_auth)):
             "SELECT id, archived FROM tasks WHERE id=?", (tid,)
         ).fetchone()
         if not row or row["archived"]:
-            conn.close(); raise HTTPException(404, f"Task {tid} not found or archived")
+            conn.close()
+            raise HTTPException(404, f"Task {tid} not found or archived")
     # All tasks in a stack must share the same column (the representative's column).
     # This ensures that unstacking puts every task back in the right column,
     # even when the pile was created by dragging across columns.
@@ -618,7 +634,8 @@ def get_stack(stack_id: str, session: str = Depends(require_auth)):
         "SELECT * FROM tasks WHERE stack_id=? ORDER BY stack_pos", (stack_id,)
     ).fetchall()
     if not rows:
-        conn.close(); raise HTTPException(404, "Stack not found")
+        conn.close()
+        raise HTTPException(404, "Stack not found")
     tasks = []
     for r in rows:
         d = row_to_dict(r)
@@ -635,7 +652,8 @@ def unstack(stack_id: str, session: str = Depends(require_auth)):
     conn.execute(
         "UPDATE tasks SET stack_id=NULL, stack_pos=0 WHERE stack_id=?", (stack_id,)
     )
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 @app.delete("/api/stacks/{stack_id}/tasks/{task_id}", status_code=200)
@@ -657,7 +675,8 @@ def remove_from_stack(stack_id: str, task_id: int,
     else:
         for i, r in enumerate(remaining):
             conn.execute("UPDATE tasks SET stack_pos=? WHERE id=?", (i, r["id"]))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 @app.patch("/api/stacks/{stack_id}/move")
@@ -667,7 +686,8 @@ def move_stack(stack_id: str, update: TaskUpdate,
     fields = {k: v for k, v in update.model_dump().items()
               if v is not None and k in _STACK_MOVE_WRITABLE}
     if not fields:
-        conn.close(); raise HTTPException(400, "Nothing to update")
+        conn.close()
+        raise HTTPException(400, "Nothing to update")
 
     new_col = fields.get("column")
     if new_col:

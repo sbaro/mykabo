@@ -18,14 +18,8 @@ plain HTTP. This is intentional for local dev but **must** be enabled in product
 **Fix**: set `secure=True` in `response.set_cookie(...)` once the app is behind
 an HTTPS reverse proxy (nginx, Caddy, Traefik, etc.).
 
-### 3. `passlib` may not be installed
-`main.py` has a graceful fallback to HMAC-SHA256, but the preferred path is
-`passlib[bcrypt]`. It must be added explicitly to `requirements.txt`.
-
-```
-passlib[bcrypt]==1.7.4
-bcrypt==4.1.3
-```
+### ~~3. `passlib` may not be installed~~ ✅ Fixed
+`passlib[bcrypt]==1.7.4` and `bcrypt==4.1.3` added to `requirements.txt`.
 
 ---
 

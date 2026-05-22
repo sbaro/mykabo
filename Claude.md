@@ -27,13 +27,13 @@ mykabot/
 ├── index.html            # Frontend (vanilla JS, served by FastAPI)
 ├── requirements.txt      # Python deps
 ├── Dockerfile
-├── docker-compose.yml
+├── compose.yml
 ├── CLAUDE.md             # ← this file
-└── docs/
+└── doc/
     ├── architecture.md   # System design & data model
     ├── api.md            # All REST endpoints
     ├── frontend.md       # Frontend architecture & conventions
-    └── known-issues.md   # Remaining TODOs & deferred items
+    └── known_issues.md   # Remaining TODOs & deferred items
 ```
 
 ---
@@ -77,7 +77,7 @@ mykabot/
 
 ## What to do next (suggested)
 
-See `docs/known-issues.md` for the full deferred list. Top priorities:
+See `doc/known_issues.md` for the full deferred list. Top priorities:
 
 1. Add `passlib` to `requirements.txt` and pin all transitive deps with `pip freeze`.
 2. Add `secure=True` to the session cookie once HTTPS/reverse-proxy is configured.

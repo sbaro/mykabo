@@ -1275,7 +1275,7 @@ document.getElementById("stack-panel").addEventListener("click",e=>{if(e.target=
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function darken(hex){let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");if(c.length!==6)return"#aaa";const n=parseInt(c,16);return`rgb(${Math.max(0,((n>>16)&0xff)-40)},${Math.max(0,((n>>8)&0xff)-40)},${Math.max(0,(n&0xff)-40)})`;}
-function esc(s){return(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function esc(s){return(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 api.get("/api/me").then(async()=>{hideLogin(); await loadCategories(); loadBoard();}).catch(()=>showLogin());

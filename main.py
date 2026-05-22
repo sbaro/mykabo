@@ -3,8 +3,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import sqlite3, os, secrets, time
-from datetime import datetime, timedelta
+import sqlite3, os, secrets, time, re
+from datetime import datetime, timezone
 
 try:
     from passlib.context import CryptContext
@@ -46,7 +46,7 @@ REMEMBER_TTL  = int(os.environ.get("REMEMBER_TTL_HOURS", str(30 * 24)))
 _failed: dict[str, list[float]] = {}   # ip -> list of epoch timestamps
 _MAX_ATTEMPTS  = 10
 _WINDOW_SECS   = 300   # 5 min window
-_LOCKOUT_SECS  = 600   # 10 min lockout
+
 
 def _is_locked(ip: str) -> bool:
     now = time.time()
@@ -276,7 +276,6 @@ def get_tasks(session: str = Depends(require_auth)):
                ORDER BY created_at DESC LIMIT 1""", (tid,)
         ).fetchone()
         if last:
-            import re
             m = re.search(r"Cause : (.+)$", last["content"])
             block_reasons[tid] = m.group(1) if m else last["content"]
     result = {col: [] for col in COLUMNS}
@@ -337,7 +336,7 @@ def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require
     conn = get_db()
     if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
         conn.close(); raise HTTPException(404, "Task not found")
-    fields = {k: v for k, v in update.dict().items()
+    fields = {k: v for k, v in update.model_dump().items()
               if v is not None and k in _TASK_WRITABLE}
     if "category" in fields:
         fields["category"] = _validate_category(conn, fields["category"])
@@ -354,14 +353,14 @@ def archive_task(task_id: int, session: str = Depends(require_auth)):
     conn = get_db()
     if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
         conn.close(); raise HTTPException(404, "Task not found")
-    conn.execute(
-        "UPDATE tasks SET archived=1, archived_at=?, stack_id=NULL WHERE id=?",
-        (datetime.utcnow().isoformat(), task_id)
-    )
-    conn.commit()
-    # Dissolve stack if only 1 member remains
+    # Read stack_id before nullifying it
     row = conn.execute("SELECT stack_id FROM tasks WHERE id=?", (task_id,)).fetchone()
     sid = row["stack_id"] if row else None
+    conn.execute(
+        "UPDATE tasks SET archived=1, archived_at=?, stack_id=NULL WHERE id=?",
+        (datetime.now(timezone.utc).isoformat(), task_id)
+    )
+    conn.commit()
     if sid:
         remaining = conn.execute(
             "SELECT id FROM tasks WHERE stack_id=? AND archived=0", (sid,)
@@ -587,7 +586,7 @@ def remove_from_stack(stack_id: str, task_id: int,
 def move_stack(stack_id: str, update: TaskUpdate,
                session: str = Depends(require_auth)):
     conn = get_db()
-    fields = {k: v for k, v in update.dict().items()
+    fields = {k: v for k, v in update.model_dump().items()
               if v is not None and k in _STACK_MOVE_WRITABLE}
     if not fields:
         conn.close(); raise HTTPException(400, "Nothing to update")

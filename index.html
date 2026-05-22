@@ -1038,6 +1038,7 @@ function makeCard(t,colId){
     ${t.description?`<div style="font-size:.78rem;color:#52525b;margin-top:5px">${esc(t.description).substring(0,80)}${t.description.length>80?"…":""}</div>`:""}
     ${reason?`<div class="blocked-sticker">🚧 <span>${esc(blockReasonShort(reason))}</span></div>`:""}`;
   card.addEventListener("click",e=>{if(!selectMode)return;if(e.target.closest(".card-actions"))return;toggleCardSelect(t.id);});
+  card.addEventListener("dblclick",e=>{if(selectMode)return;if(e.target.closest(".card-actions"))return;openEdit(t.id);});
   card.addEventListener("dragstart",e=>{if(selectMode){e.preventDefault();return;}draggedId=t.id;draggedFromCol=t.column||colId;draggedStackId=null;setTimeout(()=>card.classList.add("dragging"),0);e.dataTransfer.effectAllowed="move";});
   card.addEventListener("dragend",()=>{card.classList.remove("dragging");resetDragState();document.querySelectorAll(".drop-indicator").forEach(i=>i.classList.remove("visible"));clearStackHover();});
   const ind=document.createElement("div"); ind.className="drop-indicator";
@@ -1076,6 +1077,7 @@ function makeStackCard(t,colId){
       <button class="stack-ctrl-btn" onclick="unstackDirect('${stackId}')">🗂️ Désempiler</button>
     </div>`;
   card.addEventListener("click",e=>{if(!selectMode)return;if(e.target.closest(".card-actions,.stack-controls"))return;toggleCardSelect(t.id);});
+  card.addEventListener("dblclick",e=>{if(selectMode)return;if(e.target.closest(".card-actions,.stack-controls"))return;openEdit(t.id);});
   card.addEventListener("dragstart",e=>{if(selectMode){e.preventDefault();return;}draggedStackId=stackId;draggedId=null;draggedFromCol=t.column||colId;setTimeout(()=>card.classList.add("dragging"),0);e.dataTransfer.effectAllowed="move";});
   card.addEventListener("dragend",()=>{card.classList.remove("dragging");resetDragState();clearStackHover();});
   const badge=document.createElement("div"); badge.className="stack-badge"; badge.textContent=`×${count}`;

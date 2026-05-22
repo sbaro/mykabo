@@ -439,8 +439,8 @@ async function stackTwoTasks(targetId,droppedId){
       const res=await api.post("/api/stacks",{task_ids:[...existingIds,droppedId]});
       if(target.column==="blocked"&&dropped.column!=="blocked")
         // Single task newly blocked: open modal so user can give a reason.
-        // pendingStack lets cancelBlock dissolve the pile if user cancels.
-        openBlockModal(droppedId,dropped.column,res.stack_id);
+        // dissolveAndRevert lets cancelBlock dissolve the pile if user cancels.
+        openBlockModal(droppedId,dropped.column,{type:"dissolveAndRevert",stackId:res.stack_id});
       else await loadBoard();
     }else if(dropped.stack_id){
       // Adding target to dropped's existing stack — target's column wins.
@@ -461,7 +461,7 @@ async function stackTwoTasks(targetId,droppedId){
       // Simple two-task pile creation.
       const res=await api.post("/api/stacks",{task_ids:[targetId,droppedId]});
       if(target.column==="blocked"&&dropped.column!=="blocked")
-        openBlockModal(droppedId,dropped.column,res.stack_id);
+        openBlockModal(droppedId,dropped.column,{type:"dissolveAndRevert",stackId:res.stack_id});
       else await loadBoard();
     }
   }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'empilement.",true);}
@@ -522,8 +522,14 @@ async function unstackDirect(stackId){
 }
 
 // ── BLOCK FLOW ────────────────────────────────────────────────────────────────
-function openBlockModal(taskId,previousCol,stackId=null){
-  pendingBlock={taskId,previousCol,stackId};
+// openBlockModal accepts a single id or an array of ids.
+// cancelAction shapes:
+//   null                                    → revert single task column
+//   {type:"dissolveAndRevert", stackId}     → dissolve new pile + revert task column
+//   {type:"moveStack", sid}                 → move whole pile back to previousCol
+function openBlockModal(taskIds,previousCol,cancelAction=null){
+  const ids=Array.isArray(taskIds)?taskIds:[taskIds];
+  pendingBlock={taskIds:ids,previousCol,cancelAction};
   document.getElementById("block-reason").value="";
   document.getElementById("block-overlay").classList.add("open");
   setTimeout(()=>document.getElementById("block-reason").focus(),50);
@@ -531,14 +537,17 @@ function openBlockModal(taskId,previousCol,stackId=null){
 function cancelBlock(){
   document.getElementById("block-overlay").classList.remove("open");
   if(pendingBlock){
-    const{taskId,previousCol,stackId}=pendingBlock;
-    if(stackId){
+    const{taskIds,previousCol,cancelAction}=pendingBlock;
+    if(cancelAction?.type==="dissolveAndRevert"){
       // Pile créée par drag inter-colonne : la dissoudre et laisser la tâche
       // retourner dans sa colonne d'origine (column est mis à jour par unstack).
-      api.del(`/api/stacks/${stackId}`).then(()=>
-        api.patch(`/api/tasks/${taskId}`,{column:previousCol})).then(loadBoard).catch(()=>{});
+      api.del(`/api/stacks/${cancelAction.stackId}`).then(()=>
+        api.patch(`/api/tasks/${taskIds[0]}`,{column:previousCol})).then(loadBoard).catch(()=>{});
+    }else if(cancelAction?.type==="moveStack"){
+      // Pile entière déplacée vers Blocked : la redéplacer vers sa colonne d'origine.
+      api.patch(`/api/stacks/${cancelAction.sid}/move`,{column:previousCol,position:0}).then(loadBoard).catch(()=>{});
     }else{
-      api.patch(`/api/tasks/${taskId}`,{column:previousCol}).then(loadBoard).catch(()=>{});
+      api.patch(`/api/tasks/${taskIds[0]}`,{column:previousCol}).then(loadBoard).catch(()=>{});
     }
   }
   pendingBlock=null;
@@ -547,9 +556,12 @@ async function confirmBlock(){
   const reason=document.getElementById("block-reason").value.trim();
   if(!reason){document.getElementById("block-reason").focus();return;}
   document.getElementById("block-overlay").classList.remove("open");
-  const{taskId}=pendingBlock; pendingBlock=null;
+  const{taskIds}=pendingBlock; pendingBlock=null;
+  const dateStr=new Date().toLocaleString("fr-FR");
   try{
-    await api.post(`/api/tasks/${taskId}/comments`,{content:`🚧 [BLOQUÉ le ${new Date().toLocaleString("fr-FR")}] — Cause : ${reason}`});
+    await Promise.all(taskIds.map(id=>
+      api.post(`/api/tasks/${id}/comments`,{content:`🚧 [BLOQUÉ le ${dateStr}] — Cause : ${reason}`})
+    ));
     await loadBoard();
   }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'enregistrement du blocage.",true);}
 }
@@ -650,14 +662,25 @@ function setupColDrop(body,colId){
       const sid=draggedStackId, prevCol=draggedFromCol; resetDragState();
       try{
         const result=await api.patch(`/api/stacks/${sid}/move`,{column:colId,position:0});
-        // Handle block/unblock comments for each task in the stack
         if(result.prev_cols&&result.new_col){
-          await Promise.all(Object.entries(result.prev_cols).map(async([tid,pc])=>{
-            if(result.new_col==="blocked"&&pc!=="blocked")
-              await api.post(`/api/tasks/${tid}/comments`,{content:`🚧 [BLOQUÉ le ${new Date().toLocaleString("fr-FR")}] — Pile déplacée vers Blocked`}).catch(()=>{});
-            else if(pc==="blocked"&&result.new_col!=="blocked")
-              await handleUnblock(parseInt(tid),result.new_col).catch(()=>{});
-          }));
+          if(result.new_col==="blocked"){
+            // Collect tasks that were not already blocked
+            const newlyBlockedIds=Object.entries(result.prev_cols)
+              .filter(([,pc])=>pc!=="blocked")
+              .map(([tid])=>parseInt(tid));
+            if(newlyBlockedIds.length>0){
+              // Open modal once — user provides a single reason applied to all.
+              // cancelBlock will move the whole pile back to prevCol.
+              openBlockModal(newlyBlockedIds,prevCol,{type:"moveStack",sid});
+              return; // board reload is handled by confirmBlock / cancelBlock
+            }
+          }else{
+            // Handle unblock comments for tasks that were in Blocked before
+            await Promise.all(Object.entries(result.prev_cols).map(async([tid,pc])=>{
+              if(pc==="blocked")
+                await handleUnblock(parseInt(tid),result.new_col).catch(()=>{});
+            }));
+          }
         }
       }catch(e){if(e.message!=="unauth")toast("Erreur lors du déplacement de la pile.",true);}
       await loadBoard(); return;
@@ -696,6 +719,14 @@ function clearStackHover(){
 }
 
 // ── CARD RENDERING ────────────────────────────────────────────────────────────
+// Extracts only the user-typed reason from a raw block comment.
+// Raw format: "🚧 [BLOQUÉ le {date}] — Cause : {reason}"
+// Falls back gracefully for older auto-comments ("Pile déplacée vers Blocked").
+function blockReasonShort(raw){
+  if(!raw)return"";
+  const m=raw.match(/^🚧 \[BLOQUÉ le [^\]]*\] — (?:Cause : )?(.+)$/s);
+  return m?m[1]:raw.replace(/^🚧\s*/,"");
+}
 function makeCard(t,colId){
   const card=document.createElement("div");
   card.className="card"+(selectedIds.has(t.id)?" selected":"");
@@ -722,7 +753,7 @@ function makeCard(t,colId){
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
     ${t.description?`<div style="font-size:.78rem;color:#52525b;margin-top:5px">${esc(t.description).substring(0,80)}${t.description.length>80?"…":""}</div>`:""}
-    ${reason?`<div class="blocked-sticker">🚧 <span>${esc(reason)}</span></div>`:""}`;
+    ${reason?`<div class="blocked-sticker">🚧 <span>${esc(blockReasonShort(reason))}</span></div>`:""}`;
   card.addEventListener("click",e=>{if(!selectMode)return;if(e.target.closest(".card-actions"))return;toggleCardSelect(t.id);});
   card.addEventListener("dragstart",e=>{if(selectMode){e.preventDefault();return;}draggedId=t.id;draggedFromCol=t.column||colId;draggedStackId=null;setTimeout(()=>card.classList.add("dragging"),0);e.dataTransfer.effectAllowed="move";});
   card.addEventListener("dragend",()=>{card.classList.remove("dragging");resetDragState();document.querySelectorAll(".drop-indicator").forEach(i=>i.classList.remove("visible"));clearStackHover();});
@@ -756,7 +787,7 @@ function makeStackCard(t,colId){
       ${t.category?`<span class="tag">${esc(t.category)}</span>`:""}
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
-    ${reason?`<div class="blocked-sticker">🚧 <span>${esc(reason)}</span></div>`:""}
+    ${reason?`<div class="blocked-sticker">🚧 <span>${esc(blockReasonShort(reason))}</span></div>`:""}
     <div class="stack-controls">
       <button class="stack-ctrl-btn" onclick="openStackPanel('${stackId}')">📋 Voir la pile (${count})</button>
       <button class="stack-ctrl-btn" onclick="unstackDirect('${stackId}')">🗂️ Désempiler</button>

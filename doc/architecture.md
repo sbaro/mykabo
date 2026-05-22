@@ -32,6 +32,7 @@ file server. All API routes are prefixed `/api/`.
 | `archived_at` | TEXT | ISO datetime or NULL |
 | `stack_id` | TEXT | Foreign key to logical stack (token string) or NULL |
 | `stack_pos` | INTEGER | Position within stack (0 = representative shown on board) |
+| `recurrence` | TEXT | `daily`, `weekly`, `monthly`, `yearly`, or NULL |
 | `created_at` | TEXT | ISO datetime, default CURRENT_TIMESTAMP |
 
 **Unique index**: `uq_stack_pos ON tasks(stack_id, stack_pos) WHERE stack_id IS NOT NULL`

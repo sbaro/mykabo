@@ -62,7 +62,8 @@ Returns all archived tasks ordered by `archived_at DESC`.
   "color": "#fef08a",
   "category": "",       // must be "" or match an existing category name (see /api/categories)
   "priority": "normal",   // low | normal | high
-  "due_date": null        // "YYYY-MM-DD" or null
+  "due_date": null,       // "YYYY-MM-DD" or null
+  "recurrence": null      // "daily" | "weekly" | "monthly" | "yearly" | null
 }
 ```
 Returns the created task object. Returns **400** if `category` is non-empty and does not match
@@ -73,10 +74,13 @@ Returns the task with its `comments` array attached.
 
 ### `PATCH /api/tasks/{id}`
 Partial update. Only fields in `_TASK_WRITABLE` are accepted:
-`title`, `description`, `column`, `color`, `category`, `priority`, `due_date`, `position`, `stack_id`, `stack_pos`.
+`title`, `description`, `column`, `color`, `category`, `priority`, `due_date`, `position`, `stack_id`, `stack_pos`, `recurrence`.
 
 `category` is validated against the `categories` table when present — send `""` to clear it, or
 an existing category name to set it. Unknown names return **400**.
+
+`recurrence` must be one of `"daily"`, `"weekly"`, `"monthly"`, `"yearly"`, or omitted/`null` to
+clear it. Invalid values are silently ignored.
 
 Returns the updated task object.
 
@@ -86,6 +90,16 @@ is dissolved if fewer than 2 members remain.
 
 ### `POST /api/tasks/{id}/archive`
 Sets `archived=1`, `archived_at=now()`, `stack_id=NULL`. Dissolves the stack if needed.
+
+If the task has a `recurrence` value, a new task is automatically created in `backlog` with the
+same title, description, color, category, priority and recurrence, and a `due_date` advanced by
+one period (day / week / month / year). If the original task had no `due_date`, the new task
+inherits `null`.
+
+```json
+// Response
+{ "ok": true, "next_task": { ...task } }  // next_task is null when not recurring
+```
 
 ### `POST /api/tasks/{id}/unarchive`
 Sets `archived=0`, `archived_at=NULL`.

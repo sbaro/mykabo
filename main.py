@@ -3,8 +3,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-import sqlite3, os, secrets, time, re
-from datetime import datetime, timezone
+import sqlite3, os, secrets, time, re, calendar
+from datetime import datetime, timezone, date, timedelta
 
 try:
     from passlib.context import CryptContext
@@ -93,7 +93,7 @@ def require_auth(session: Optional[str] = Cookie(default=None)) -> str:
 # Explicit allowlists to prevent SQL-injection via field names
 _TASK_WRITABLE = frozenset({
     "title","description","column","color","category",
-    "priority","due_date","position","stack_id","stack_pos",
+    "priority","due_date","position","stack_id","stack_pos","recurrence",
 })
 _STACK_MOVE_WRITABLE = frozenset({"column","position"})
 
@@ -142,6 +142,7 @@ def init_db():
         ("archived_at", "TEXT DEFAULT NULL"),
         ("stack_id",    "TEXT DEFAULT NULL"),
         ("stack_pos",   "INTEGER DEFAULT 0"),
+        ("recurrence",  "TEXT DEFAULT NULL"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")
@@ -191,6 +192,7 @@ class TaskCreate(BaseModel):
     category:    Optional[str] = ""
     priority:    Optional[str] = "normal"
     due_date:    Optional[str] = None
+    recurrence:  Optional[str] = None
 
 class TaskUpdate(BaseModel):
     title:       Optional[str] = None
@@ -203,6 +205,7 @@ class TaskUpdate(BaseModel):
     position:    Optional[int] = None
     stack_id:    Optional[str] = None
     stack_pos:   Optional[int] = None
+    recurrence:  Optional[str] = None
 
 class CommentCreate(BaseModel):
     content: str
@@ -219,6 +222,27 @@ class CategoryCreate(BaseModel):
 class CategoryUpdate(BaseModel):
     name:     Optional[str] = None
     position: Optional[int] = None
+
+RECURRENCES = {"daily", "weekly", "monthly", "yearly"}
+
+def _next_due(due_str: str | None, recurrence: str) -> str | None:
+    if not due_str:
+        return None
+    d = date.fromisoformat(due_str)
+    if recurrence == "daily":
+        return (d + timedelta(days=1)).isoformat()
+    if recurrence == "weekly":
+        return (d + timedelta(weeks=1)).isoformat()
+    if recurrence == "monthly":
+        month = d.month % 12 + 1
+        year  = d.year + (1 if d.month == 12 else 0)
+        day   = min(d.day, calendar.monthrange(year, month)[1])
+        return date(year, month, day).isoformat()
+    if recurrence == "yearly":
+        year = d.year + 1
+        day  = min(d.day, calendar.monthrange(year, d.month)[1])
+        return date(year, d.month, day).isoformat()
+    return due_str
 
 def row_to_dict(r): return dict(r)
 
@@ -312,12 +336,13 @@ def create_task(task: TaskCreate, session: str = Depends(require_auth)):
     mp = conn.execute(
         "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column=?", (task.column,)
     ).fetchone()[0]
+    recurrence = task.recurrence if task.recurrence in RECURRENCES else None
     c = conn.cursor()
     c.execute(
-        "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position)"
-        " VALUES (?,?,?,?,?,?,?,?)",
+        "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position,recurrence)"
+        " VALUES (?,?,?,?,?,?,?,?,?)",
         (task.title, task.description, task.column, task.color,
-         category, task.priority, task.due_date, mp + 1)
+         category, task.priority, task.due_date, mp + 1, recurrence)
     )
     tid = c.lastrowid
     conn.commit()
@@ -347,6 +372,8 @@ def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require
               if v is not None and k in _TASK_WRITABLE}
     if "category" in fields:
         fields["category"] = _validate_category(conn, fields["category"])
+    if "recurrence" in fields and fields["recurrence"] not in RECURRENCES:
+        fields.pop("recurrence")
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         conn.execute(f"UPDATE tasks SET {sets} WHERE id=?", (*fields.values(), task_id))
@@ -358,11 +385,11 @@ def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require
 @app.post("/api/tasks/{task_id}/archive")
 def archive_task(task_id: int, session: str = Depends(require_auth)):
     conn = get_db()
-    if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
+    task_row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if not task_row:
         conn.close(); raise HTTPException(404, "Task not found")
-    # Read stack_id before nullifying it
-    row = conn.execute("SELECT stack_id FROM tasks WHERE id=?", (task_id,)).fetchone()
-    sid = row["stack_id"] if row else None
+    task_data = row_to_dict(task_row)
+    sid = task_data.get("stack_id")
     conn.execute(
         "UPDATE tasks SET archived=1, archived_at=?, stack_id=NULL WHERE id=?",
         (datetime.now(timezone.utc).isoformat(), task_id)
@@ -376,8 +403,26 @@ def archive_task(task_id: int, session: str = Depends(require_auth)):
             for r in remaining:
                 conn.execute("UPDATE tasks SET stack_id=NULL, stack_pos=0 WHERE id=?", (r["id"],))
             conn.commit()
+    # Spawn next occurrence for recurring tasks
+    next_task = None
+    if task_data.get("recurrence") in RECURRENCES:
+        next_due = _next_due(task_data.get("due_date"), task_data["recurrence"])
+        mp = conn.execute(
+            "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column='backlog'"
+        ).fetchone()[0]
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO tasks (title,description,column,color,category,priority,"
+            "due_date,position,recurrence) VALUES (?,?,?,?,?,?,?,?,?)",
+            (task_data["title"], task_data["description"], "backlog",
+             task_data["color"], task_data["category"], task_data["priority"],
+             next_due, mp + 1, task_data["recurrence"])
+        )
+        new_id = c.lastrowid
+        conn.commit()
+        next_task = row_to_dict(conn.execute("SELECT * FROM tasks WHERE id=?", (new_id,)).fetchone())
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "next_task": next_task}
 
 @app.post("/api/tasks/{task_id}/unarchive")
 def unarchive_task(task_id: int, session: str = Depends(require_auth)):

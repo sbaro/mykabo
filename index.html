@@ -389,6 +389,15 @@
     </div>
     <div class="form-group"><label>Catégorie</label><select id="f-category"><option value="">— Aucune —</option></select></div>
     <div class="form-group"><label>Date d'échéance</label><input id="f-due" type="date"/></div>
+    <div class="form-group"><label>Récurrence</label>
+      <select id="f-recurrence">
+        <option value="">— Aucune —</option>
+        <option value="daily">Quotidienne</option>
+        <option value="weekly">Hebdomadaire</option>
+        <option value="monthly">Mensuelle</option>
+        <option value="yearly">Annuelle</option>
+      </select>
+    </div>
     <div class="form-group"><label>Couleur du post-it</label><div class="color-row" id="color-row"></div></div>
     <div class="btn-row">
       <button class="btn btn-ghost"   onclick="closeModal()">Annuler</button>
@@ -1033,6 +1042,7 @@ function makeCard(t,colId){
     <div class="card-meta">
       <span class="tag priority-${t.priority}">${{low:"Basse",normal:"Normale",high:"Haute"}[t.priority]}</span>
       ${t.category?`<span class="tag">${esc(t.category)}</span>`:""}
+      ${t.recurrence?`<span class="tag recurrence-tag" title="Récurrence : ${{daily:"quotidienne",weekly:"hebdomadaire",monthly:"mensuelle",yearly:"annuelle"}[t.recurrence]||t.recurrence}">♻️</span>`:""}
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
     ${t.description?`<div style="font-size:.78rem;color:#52525b;margin-top:5px">${esc(t.description).substring(0,80)}${t.description.length>80?"…":""}</div>`:""}
@@ -1069,6 +1079,7 @@ function makeStackCard(t,colId){
     <div class="card-meta">
       <span class="tag priority-${t.priority}">${{low:"Basse",normal:"Normale",high:"Haute"}[t.priority]}</span>
       ${t.category?`<span class="tag">${esc(t.category)}</span>`:""}
+      ${t.recurrence?`<span class="tag recurrence-tag" title="Récurrence : ${{daily:"quotidienne",weekly:"hebdomadaire",monthly:"mensuelle",yearly:"annuelle"}[t.recurrence]||t.recurrence}">♻️</span>`:""}
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
     ${reason?`<div class="blocked-sticker">🚧 <span>${esc(blockReasonShort(reason))}</span></div>`:""}
@@ -1086,21 +1097,27 @@ function makeStackCard(t,colId){
   const frag=document.createDocumentFragment(); frag.appendChild(wrapper); frag.appendChild(ind); return frag;
 }
 
-async function quickArchive(e,id){e.stopPropagation();if(!confirm("Archiver ?"))return;try{await api.post(`/api/tasks/${id}/archive`,{});await loadBoard();}catch(err){if(err.message!=="unauth")toast("Erreur lors de l'archivage.",true);}}
+async function quickArchive(e,id){e.stopPropagation();if(!confirm("Archiver ?"))return;try{const r=await api.post(`/api/tasks/${id}/archive`,{});if(r.next_task)toast("♻️ Nouvelle occurrence créée dans le backlog.");await loadBoard();}catch(err){if(err.message!=="unauth")toast("Erreur lors de l'archivage.",true);}}
 async function quickArchiveStack(e,stackId){
   e.stopPropagation();
   try{
     const data=await api.get(`/api/stacks/${stackId}`);
     if(!confirm(`Archiver les ${data.tasks.length} tâches de cette pile ?`))return;
-    await Promise.all(data.tasks.map(t=>api.post(`/api/tasks/${t.id}/archive`,{})));
+    const results=await Promise.all(data.tasks.map(t=>api.post(`/api/tasks/${t.id}/archive`,{})));
+    const spawned=results.filter(r=>r.next_task).length;
+    if(spawned)toast(`♻️ ${spawned} nouvelle${spawned>1?"s":""} occurrence${spawned>1?"s":""} créée${spawned>1?"s":""} dans le backlog.`);
     await loadBoard();
   }catch(err){if(err.message!=="unauth")toast("Erreur lors de l'archivage.",true);}
 }
 async function archiveAll(col){
   const items=tasks[col]||[]; if(!items.length)return;
   if(!confirm(`Archiver les ${items.length} tâche(s) ?`))return;
-  try{await Promise.all(items.map(t=>api.post(`/api/tasks/${t.id}/archive`,{})));await loadBoard();}
-  catch(err){if(err.message!=="unauth")toast("Erreur lors de l'archivage en masse.",true);}
+  try{
+    const results=await Promise.all(items.map(t=>api.post(`/api/tasks/${t.id}/archive`,{})));
+    const spawned=results.filter(r=>r.next_task).length;
+    if(spawned)toast(`♻️ ${spawned} nouvelle${spawned>1?"s":""} occurrence${spawned>1?"s":""} créée${spawned>1?"s":""} dans le backlog.`);
+    await loadBoard();
+  }catch(err){if(err.message!=="unauth")toast("Erreur lors de l'archivage en masse.",true);}
 }
 
 // ── ARCHIVE PANEL ─────────────────────────────────────────────────────────────
@@ -1275,7 +1292,8 @@ function openNew(){
   document.getElementById("col-field").style.display="none";
   document.getElementById("f-priority").value="normal";
   populateCategorySelect(document.getElementById("f-category"),"");
-  document.getElementById("f-due").value=""; document.getElementById("btn-delete").style.display="none";
+  document.getElementById("f-due").value=""; document.getElementById("f-recurrence").value="";
+  document.getElementById("btn-delete").style.display="none";
   document.getElementById("btn-archive").style.display="none"; document.getElementById("comments-area").style.display="none";
   setColor(COLORS[0]); document.getElementById("overlay").classList.add("open");
   setTimeout(()=>document.getElementById("f-title").focus(),50);
@@ -1289,7 +1307,9 @@ async function openEdit(id){
     document.getElementById("f-col").value=t.column; document.getElementById("col-field").style.display="block";
     document.getElementById("f-priority").value=t.priority||"normal";
     populateCategorySelect(document.getElementById("f-category"),t.category||"");
-    document.getElementById("f-due").value=t.due_date||""; document.getElementById("btn-delete").style.display="inline-flex";
+    document.getElementById("f-due").value=t.due_date||"";
+    document.getElementById("f-recurrence").value=t.recurrence||"";
+    document.getElementById("btn-delete").style.display="inline-flex";
     document.getElementById("btn-archive").style.display=ARCHIVABLE.includes(t.column)?"inline-flex":"none";
     setColor(t.color||COLORS[0]); document.getElementById("comments-area").style.display="block";
     renderComments(t.comments||[]); document.getElementById("overlay").classList.add("open");
@@ -1319,7 +1339,7 @@ function closeModal(){document.getElementById("overlay").classList.remove("open"
 async function saveTask(){
   const title=document.getElementById("f-title").value.trim(); if(!title){document.getElementById("f-title").focus();return;}
   const newCol=document.getElementById("f-col").value;
-  const payload={title,description:document.getElementById("f-desc").value,column:newCol,priority:document.getElementById("f-priority").value,category:document.getElementById("f-category").value,due_date:document.getElementById("f-due").value||null,color:selectedColor};
+  const payload={title,description:document.getElementById("f-desc").value,column:newCol,priority:document.getElementById("f-priority").value,category:document.getElementById("f-category").value,due_date:document.getElementById("f-due").value||null,color:selectedColor,recurrence:document.getElementById("f-recurrence").value||null};
   try{
     if(currentTaskId){
       const prevCol=findTaskCol(currentTaskId); await api.patch(`/api/tasks/${currentTaskId}`,payload);
@@ -1336,8 +1356,11 @@ async function deleteCurrentTask(){
 }
 async function archiveCurrentTask(){
   if(!currentTaskId||!confirm("Archiver ?"))return;
-  try{await api.post(`/api/tasks/${currentTaskId}/archive`,{});closeModal();}
-  catch(e){if(e.message!=="unauth")toast("Erreur lors de l'archivage.",true);}
+  try{
+    const r=await api.post(`/api/tasks/${currentTaskId}/archive`,{});
+    if(r.next_task)toast("♻️ Nouvelle occurrence créée dans le backlog.");
+    closeModal();
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'archivage.",true);}
 }
 function findTaskCol(id){for(const[col,items]of Object.entries(tasks))if(items.find(t=>t.id===id))return col;return null;}
 

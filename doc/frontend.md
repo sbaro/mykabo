@@ -76,13 +76,15 @@ There is no optimistic UI; the board always reflects server state.
 ┌──────────────────────────────────┐
 │ [✓ checkbox, select mode only]   │ ← .card-check (absolute, top-right)
 │ Title                [✏️] [🗄️]  │ ← .card-top + .card-actions (hover)
-│ [Priority tag] [Category tag]    │ ← .card-meta
+│ [Priority] [Category] [♻️]       │ ← .card-meta (♻️ only when recurrence set)
 │ 📅 Due date (red if overdue)     │
 │ Description excerpt…             │
 │ 🚧 Block reason sticker          │ ← only when column === "blocked"
 └──────────────────────────────────┘
 [drop-indicator div]                ← 3px blue line between cards
 ```
+
+Double-clicking a card (outside the action buttons) opens the edit modal. In select mode, double-click is ignored.
 
 ### Stack card (`makeStackCard`)
 Same as above, plus:
@@ -156,6 +158,8 @@ in the task modal (`#f-category`) and bulk modal (`#bulk-category`) are populate
 category, and preserves stale legacy values as a `(obsolète)` fallback option.
 
 **New task modal**: `#col-field` is hidden and `#f-col` is explicitly set to `"backlog"` before opening. The column selector is only visible when editing an existing task.
+
+**Recurrence field** (`#f-recurrence`): a `<select>` with options `daily`, `weekly`, `monthly`, `yearly`, or empty (none). Included in the `saveTask` payload as `recurrence` (null when empty). When a recurring task is archived, the frontend checks `response.next_task` and shows a toast `♻️ Nouvelle occurrence créée dans le backlog.` This check applies in `archiveCurrentTask`, `quickArchive`, `quickArchiveStack`, and `archiveAll`.
 
 ---
 

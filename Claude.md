@@ -79,7 +79,7 @@ mykabot/
 
 See `doc/known_issues.md` for the full deferred list. Top priorities:
 
-1. Add `passlib` to `requirements.txt` and pin all transitive deps with `pip freeze`.
+1. ~~Add `passlib` to `requirements.txt`~~ ✅ Done.
 2. Add `secure=True` to the session cookie once HTTPS/reverse-proxy is configured.
 3. ~~Replace in-memory session dict with a persistent store~~ ✅ Done — sessions table in SQLite.
 4. Add a `GET /api/health` endpoint for the Docker healthcheck.

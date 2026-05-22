@@ -1,0 +1,12 @@
+services:
+  kanban:
+    build: .
+    container_name: kanban
+    restart: unless-stopped
+    ports:
+      - "8000:8000"        # Changez le port gauche si besoin, ex: "80:8000"
+    volumes:
+      - kanban_data:/data  # Persistance de la base SQLite
+
+volumes:
+  kanban_data:

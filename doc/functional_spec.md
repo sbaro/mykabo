@@ -61,7 +61,7 @@ The board scrolls horizontally if it does not fit the viewport.
 | Description | Text | No | Truncated to 80 chars on the card; full text in modal |
 | Column | Enum | Yes | One of the six column IDs |
 | Color | Hex color | No | Post-it background color; chosen from a 10-color palette |
-| Category | Text | No | Free-form label displayed as a tag on the card |
+| Category | Text | No | Chosen from a managed list (see § 8). Empty (“no category”) is allowed. Displayed as a tag on the card. |
 | Priority | Enum | No | `low`, `normal` (default), `high`; displayed as a colored tag |
 | Due date | Date | No | Displayed on card; shown in red with ⚠️ if past due and task is not done/discarded |
 
@@ -118,7 +118,55 @@ When a task leaves the **Blocked** column:
 
 ---
 
-## 6. Comments
+## 6. Categories
+
+### 6.1 Curated list
+- Tasks reference categories by **name** from a curated list (strict mode).
+- The category dropdown in the task modal lists every category from the management drawer plus “— Aucune —”.
+- The backend rejects any task create/update whose `category` is non-empty and not in the list (HTTP 400).
+
+### 6.2 Managing the list
+- The **🏷️ Catégories** button in the header opens a right-side drawer.
+- The drawer lists every category with its current task count.
+- Per row:
+  - **✏️** opens inline edit; **✓** saves, **✕** cancels. Validations: required, ≤ 50 chars, unique.
+  - **🗑️** deletes after a `confirm()` dialog. Tasks that used this category are silently left without one.
+- A **“+ Ajouter”** input at the bottom of the drawer creates a new category.
+
+### 6.3 Effects of changes
+- **Renaming** a category propagates to every task using it (server-side, in the same transaction).
+- **Deleting** a category clears the field on every task that used it (no reassignment prompt).
+- Renames and deletions trigger a full board reload so card tags and filter chips reflect the change.
+- The bulk-edit “🏷️ Catégorie” action also surfaces the curated list with an explicit “— Aucune (effacer le champ) —” option to clear the field on selected tasks.
+
+### 6.4 Initial population
+- On first startup the backend extracts the distinct non-empty `category` values from existing tasks and inserts them into the new table, ordered by usage descending.
+
+---
+
+## 7. Filtering the board
+
+### 7.1 Filter bar
+- Located under the header, sticky during horizontal scroll.
+- In **compact mode** (default), the bar shows a single **🔍 Filtres** button until the user expands it; when filters are active it stays expanded and a badge shows the active filter count.
+- Two groups of toggleable chips:
+  - **⚡ Priorité** — Haute, Normale, Basse, with their priority colours.
+  - **🏷️ Catégorie** — one chip per category that is currently in use on the board, sorted by frequency.
+- Each chip displays a count of matching tasks.
+
+### 7.2 Logic
+- Within a group: **OR** (any selected chip matches).
+- Between groups: **AND** (selected priorities AND selected categories must both match).
+- An **↺ Tout effacer** button clears all active filters at once.
+
+### 7.3 Behaviour
+- Non-matching cards are **dimmed** (greyscaled, opacity .18) rather than hidden, preserving the overall layout and stack counts.
+- Each column header badge shows `matches/total` while filters are active.
+- Filters apply to the representative of a stack; a stack stays visible if **any** member matches.
+
+---
+
+## 8. Comments
 
 - Each task can have an unlimited number of comments.
 - Comments are visible in the edit modal, ordered chronologically.
@@ -129,19 +177,19 @@ When a task leaves the **Blocked** column:
 
 ---
 
-## 7. Archiving
+## 9. Archiving
 
-### 7.1 Archiving a single task
+### 9.1 Archiving a single task
 - Available only for tasks in the **Done** or **Discarded** columns.
 - Accessible via the 🗄️ button on the card or in the edit modal.
 - Requires confirmation.
 - Archived tasks disappear from the board but are not deleted.
 
-### 7.2 Archiving an entire column
+### 9.2 Archiving an entire column
 - A **"🗄️ Tout archiver (N)"** button appears at the bottom of Done and Discarded columns when they contain tasks.
 - Archives all tasks in the column in one action. Requires confirmation.
 
-### 7.3 Archive drawer
+### 9.3 Archive drawer
 - Accessible via the **"🗄️ Archives"** button in the header.
 - Opens as a right-side drawer listing all archived tasks, grouped by their original column.
 - Each archived task shows its title, archive date, and category.
@@ -151,28 +199,28 @@ When a task leaves the **Blocked** column:
 
 ---
 
-## 8. Stacks
+## 10. Stacks
 
 A **stack** is a visual and logical grouping of two or more tasks displayed as a
 single layered card on the board.
 
-### 8.1 Visual representation
+### 10.1 Visual representation
 - Stacked cards appear as a deck with two ghost cards peeking behind the representative card.
 - A purple **×N** badge in the top-left corner indicates the number of tasks in the stack.
 - Only the **representative task** (first task added, `stack_pos=0`) is visible on the board.
 
-### 8.2 Creating a stack — by drag & drop
+### 10.2 Creating a stack — by drag & drop
 - Drag one card onto the **middle third** of another card.
 - A purple dashed overlay with "📚 Empiler" appears on the target card to confirm intent.
 - Releasing the drag creates the stack. The target card becomes the representative.
 - An existing stack can absorb a new card by dragging onto it.
 - Two existing stacks can be merged by dragging one onto the other.
 
-### 8.3 Creating a stack — by selection
+### 10.3 Creating a stack — by selection
 - Enter selection mode (☑️ Sélection), select 2 or more tasks, then click **📚 Empiler** in the floating toolbar.
 - The first selected task becomes the representative.
 
-### 8.4 Browsing a stack
+### 10.4 Browsing a stack
 - Click **"📋 Voir la pile (N)"** on a stack card to open the stack drawer.
 - The drawer lists all tasks in the stack with their priority, category, due date, and description excerpt.
 - The representative is labelled **Rep.**
@@ -180,38 +228,38 @@ single layered card on the board.
   - ✏️ button: closes the drawer and opens the task's edit modal.
   - **↗️ Éjecter**: removes the task from the stack; it remains in the same column as a standalone card. If only 1 task remains, the stack is automatically dissolved.
 
-### 8.5 Moving a stack
+### 10.5 Moving a stack
 - Dragging the representative card moves **all tasks** in the stack to the target column simultaneously.
 - Block/unblock system comments are posted for each affected task as appropriate.
 
-### 8.6 Archiving a stack
+### 10.6 Archiving a stack
 - The 🗄️ button on a stack card archives **all tasks** in the stack at once. Requires confirmation.
 
-### 8.7 Unstacking
+### 10.7 Unstacking
 - **"🗂️ Désempiler"** on the stack card, or **"🗂️ Désempiler toutes les tâches"** in the stack drawer.
 - Dissolves the stack; all tasks remain in their column as independent cards.
 - Requires confirmation.
 
-### 8.8 Stack integrity rules
+### 10.8 Stack integrity rules
 - A stack must always contain at least 2 tasks. Any operation that would leave 1 member automatically dissolves the stack.
 - Archived tasks are removed from their stack (`stack_id` set to NULL). If this leaves fewer than 2 active members, the stack is dissolved.
 - Deleting a task from a stack follows the same rule.
 
 ---
 
-## 9. Multi-select mode
+## 11. Multi-select mode
 
-### 9.1 Activating selection mode
+### 11.1 Activating selection mode
 - Click **☑️ Sélection** in the header to toggle selection mode on/off.
 - The button turns purple when active.
 - Drag & drop is disabled while in selection mode.
 
-### 9.2 Selecting tasks
+### 11.2 Selecting tasks
 - In selection mode, clicking any card toggles its selection.
 - Selected cards display a purple ✓ checkbox badge and a purple outline.
 - Clicking the card-actions area (edit button) does not trigger selection.
 
-### 9.3 Bulk action toolbar
+### 11.3 Bulk action toolbar
 A floating toolbar appears at the bottom of the screen whenever at least one task is selected. It shows the count of selected tasks and the following actions:
 
 | Button | Action |
@@ -224,15 +272,15 @@ A floating toolbar appears at the bottom of the screen whenever at least one tas
 | 📂 Colonne | Move all selected tasks to a chosen column |
 | ✕ | Cancel selection mode without making changes |
 
-### 9.4 Bulk edit modal
+### 11.4 Bulk edit modal
 Each bulk action (except Stack and Cancel) opens a focused modal with a single field. Leaving the field empty (where applicable) cancels without making changes.
 
-### 9.5 Bulk column move
+### 11.5 Bulk column move
 When moving selected tasks to **Blocked**, a generic system comment is added automatically to each task (no individual block-reason modals). When moving tasks out of **Blocked**, unblock comments are posted automatically.
 
 ---
 
-## 10. UI feedback & error handling
+## 12. UI feedback & error handling
 
 - All API errors surface as **toast notifications** (bottom of screen, auto-dismiss after 3 seconds). Error toasts have a red background.
 - HTTP 401 (session expired) automatically redirects to the login screen.
@@ -242,7 +290,7 @@ When moving selected tasks to **Blocked**, a generic system comment is added aut
 
 ---
 
-## 11. Out of scope (current version)
+## 13. Out of scope (current version)
 
 The following features have been explicitly **not implemented**:
 
@@ -252,8 +300,10 @@ The following features have been explicitly **not implemented**:
 - Subtasks or task dependencies
 - File attachments
 - Email or push notifications
-- Search or filtering
-- Labels beyond the single `category` field
+- Free-text search
+- Per-category colours
+- Drag-to-reorder of the categories list
+- Multiple labels per task (still one `category` field)
 - Recurring tasks
 - Time tracking
 - Swimlanes

@@ -8,6 +8,8 @@ The entire frontend lives in `index.html` — one file, no build step, no framew
 
 ```js
 tasks          // Object: { colId: [task, ...] } — mirrors GET /api/tasks response
+categories     // Array<{id, name, position}> — mirrors GET /api/categories
+activeFilters  // {priority: Set, category: Set} — chips selected in the filter bar
 selectedColor  // String: current color swatch selection (single task modal)
 currentTaskId  // Int|null: task being edited in the modal
 selectMode     // Bool: multi-select mode active
@@ -141,8 +143,17 @@ Activated by the **☑️ Sélection** header button. In select mode:
 | Block reason | `#block-overlay` | `openBlockModal(taskId, prevCol)` |
 | Stack browse | `#stack-panel` | `openStackPanel(stackId)` |
 | Archive browse | `#archive-panel` | `openArchive()` |
+| Categories | `#categories-panel` | `openCategoriesPanel()` |
 
-All modals close on background click. Stack and archive panels are right-side drawers (`.side-panel` + `.side-drawer`).
+All modals close on background click. Stack, archive and categories panels are right-side drawers (`.side-panel` + `.side-drawer`).
+
+**Categories drawer**: lists every entry from `categories` with its current task count
+(`countTasksByCategory(name)`). Inline rename uses `startEditCategory(id)` →
+`saveCategoryEdit(id)` (validations: trimmed, ≤ 50 chars, unique); deletion confirms via
+`confirm()` and silently clears the field on affected tasks server-side. The category field
+in the task modal (`#f-category`) and bulk modal (`#bulk-category`) are populated by
+`populateCategorySelect(el, current)` — which renders `— Aucune —` plus one option per
+category, and preserves stale legacy values as a `(obsolète)` fallback option.
 
 **New task modal**: `#col-field` is hidden and `#f-col` is explicitly set to `"backlog"` before opening. The column selector is only visible when editing an existing task.
 

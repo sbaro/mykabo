@@ -149,6 +149,23 @@ def init_db():
         token      TEXT PRIMARY KEY,
         expires_at REAL NOT NULL
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS categories (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        name     TEXT NOT NULL UNIQUE,
+        position INTEGER NOT NULL DEFAULT 0
+    )""")
+    # One-time seed: import distinct categories from existing tasks
+    if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
+        distinct = conn.execute(
+            "SELECT category, COUNT(*) AS cnt FROM tasks "
+            "WHERE category IS NOT NULL AND category != '' "
+            "GROUP BY category ORDER BY cnt DESC, category"
+        ).fetchall()
+        for i, row in enumerate(distinct):
+            conn.execute(
+                "INSERT OR IGNORE INTO categories (name, position) VALUES (?, ?)",
+                (row["category"], i)
+            )
     conn.commit()
     conn.close()
 
@@ -189,7 +206,29 @@ class CommentCreate(BaseModel):
 class StackCreate(BaseModel):
     task_ids: list[int]
 
+class CategoryCreate(BaseModel):
+    name: str
+
+class CategoryUpdate(BaseModel):
+    name:     Optional[str] = None
+    position: Optional[int] = None
+
 def row_to_dict(r): return dict(r)
+
+# Returns the canonical category value. Empty/None clears it; otherwise it must
+# match an existing category name in the categories table (strict mode).
+def _validate_category(conn, value) -> str:
+    if value is None or value == "":
+        return ""
+    name = value.strip()
+    if not name:
+        return ""
+    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+        raise HTTPException(
+            400,
+            f"Cat\u00e9gorie inconnue : \u00ab\u00a0{name}\u00a0\u00bb. Cr\u00e9ez-la d'abord via la gestion des cat\u00e9gories."
+        )
+    return name
 
 # ─── AUTH ─────────────────────────────────────────────────────────────────────
 @app.post("/api/login")
@@ -263,6 +302,7 @@ def get_archived(session: str = Depends(require_auth)):
 @app.post("/api/tasks", status_code=201)
 def create_task(task: TaskCreate, session: str = Depends(require_auth)):
     conn = get_db()
+    category = _validate_category(conn, task.category)
     mp = conn.execute(
         "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column=?", (task.column,)
     ).fetchone()[0]
@@ -271,7 +311,7 @@ def create_task(task: TaskCreate, session: str = Depends(require_auth)):
         "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position)"
         " VALUES (?,?,?,?,?,?,?,?)",
         (task.title, task.description, task.column, task.color,
-         task.category, task.priority, task.due_date, mp + 1)
+         category, task.priority, task.due_date, mp + 1)
     )
     tid = c.lastrowid
     conn.commit()
@@ -299,6 +339,8 @@ def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require
         conn.close(); raise HTTPException(404, "Task not found")
     fields = {k: v for k, v in update.dict().items()
               if v is not None and k in _TASK_WRITABLE}
+    if "category" in fields:
+        fields["category"] = _validate_category(conn, fields["category"])
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         conn.execute(f"UPDATE tasks SET {sets} WHERE id=?", (*fields.values(), task_id))
@@ -358,6 +400,87 @@ def delete_task(task_id: int, session: str = Depends(require_auth)):
                 conn.execute("UPDATE tasks SET stack_id=NULL, stack_pos=0 WHERE id=?", (r["id"],))
     conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
     conn.commit(); conn.close()
+
+# ─── CATEGORIES ───────────────────────────────────────────────────────────────
+@app.get("/api/categories")
+def list_categories(session: str = Depends(require_auth)):
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM categories ORDER BY position, name").fetchall()
+    conn.close()
+    return [row_to_dict(r) for r in rows]
+
+@app.post("/api/categories", status_code=201)
+def create_category(body: CategoryCreate, session: str = Depends(require_auth)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "Le nom est requis.")
+    if len(name) > 50:
+        raise HTTPException(400, "Nom trop long (50 caractères max).")
+    conn = get_db()
+    if conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+        conn.close()
+        raise HTTPException(409, f"« {name} » existe déjà.")
+    max_pos = conn.execute(
+        "SELECT COALESCE(MAX(position), -1) FROM categories"
+    ).fetchone()[0]
+    c = conn.cursor()
+    c.execute("INSERT INTO categories (name, position) VALUES (?, ?)",
+              (name, max_pos + 1))
+    cid = c.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM categories WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    return row_to_dict(row)
+
+@app.patch("/api/categories/{cat_id}")
+def update_category(cat_id: int, update: CategoryUpdate,
+                    session: str = Depends(require_auth)):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM categories WHERE id=?", (cat_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Catégorie introuvable")
+    old_name = row["name"]
+    if update.name is not None:
+        new_name = update.name.strip()
+        if not new_name:
+            conn.close()
+            raise HTTPException(400, "Le nom est requis.")
+        if len(new_name) > 50:
+            conn.close()
+            raise HTTPException(400, "Nom trop long (50 caractères max).")
+        if new_name != old_name:
+            dup = conn.execute(
+                "SELECT 1 FROM categories WHERE name=? AND id!=?",
+                (new_name, cat_id)
+            ).fetchone()
+            if dup:
+                conn.close()
+                raise HTTPException(409, f"« {new_name} » existe déjà.")
+            conn.execute("UPDATE categories SET name=? WHERE id=?", (new_name, cat_id))
+            # Propagate rename to all tasks using this category
+            conn.execute("UPDATE tasks SET category=? WHERE category=?",
+                         (new_name, old_name))
+    if update.position is not None:
+        conn.execute("UPDATE categories SET position=? WHERE id=?",
+                     (update.position, cat_id))
+    conn.commit()
+    row = conn.execute("SELECT * FROM categories WHERE id=?", (cat_id,)).fetchone()
+    conn.close()
+    return row_to_dict(row)
+
+@app.delete("/api/categories/{cat_id}", status_code=204)
+def delete_category(cat_id: int, session: str = Depends(require_auth)):
+    conn = get_db()
+    row = conn.execute("SELECT name FROM categories WHERE id=?", (cat_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Catégorie introuvable")
+    # Silently clear the category on all affected tasks, then delete.
+    conn.execute("UPDATE tasks SET category='' WHERE category=?", (row["name"],))
+    conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
+    conn.commit()
+    conn.close()
 
 # ─── COMMENTS ─────────────────────────────────────────────────────────────────
 @app.post("/api/tasks/{task_id}/comments", status_code=201)

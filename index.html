@@ -210,6 +210,26 @@
   /* Dim mode: non-matching cards faded instead of hidden */
   .card.filtered-out,.stack-wrapper.filtered-out{opacity:.18;filter:grayscale(.8);}
   .col-empty-filter{text-align:center;padding:14px 8px;font-size:.72rem;color:var(--muted);font-style:italic;opacity:.55;}
+  /* ── Categories drawer ─────────────────────────────────────────────────── */
+  .category-item{display:flex;align-items:center;gap:8px;background:#fafafa;border-radius:8px;padding:8px 12px;margin-bottom:6px;border-left:4px solid #d4d4d8;}
+  .category-item.editing{background:#fff;border-left-color:var(--accent);box-shadow:0 0 0 2px rgba(99,102,241,.12);}
+  .category-name{flex:1;font-size:.88rem;font-weight:500;color:var(--text);background:transparent;border:none;outline:none;padding:3px 0;font-family:var(--font);min-width:0;}
+  .category-item.editing .category-name{border-bottom:1.5px solid var(--accent);}
+  .category-count{font-size:.7rem;color:var(--muted);background:#f4f4f5;border-radius:99px;padding:2px 8px;font-weight:600;white-space:nowrap;flex-shrink:0;}
+  .category-actions{display:flex;gap:5px;flex-shrink:0;}
+  .category-actions button{background:none;border:1.5px solid #e4e4e7;border-radius:6px;padding:4px 8px;font-size:.78rem;cursor:pointer;transition:all .15s;color:var(--muted);}
+  .category-actions .btn-cat-edit:hover{border-color:#d97706;color:#d97706;}
+  .category-actions .btn-cat-save{border-color:#16a34a;color:#16a34a;}
+  .category-actions .btn-cat-save:hover{background:#dcfce7;}
+  .category-actions .btn-cat-cancel:hover{border-color:#71717a;color:#71717a;}
+  .category-actions .btn-cat-del:hover{border-color:var(--danger);color:var(--danger);}
+  .category-add{display:flex;gap:6px;margin-top:14px;}
+  .category-add input{flex:1;padding:8px 10px;border:1.5px solid #e4e4e7;border-radius:7px;font-size:.85rem;outline:none;font-family:var(--font);transition:border .15s;}
+  .category-add input:focus{border-color:var(--accent);}
+  .category-add button{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:8px 14px;cursor:pointer;font-size:.85rem;font-weight:600;transition:background .15s;}
+  .category-add button:hover{background:#4f46e5;}
+  .cat-empty{font-size:.85rem;color:var(--muted);text-align:center;margin:24px 0 12px;font-style:italic;}
+  .cat-hint{font-size:.72rem;color:var(--muted);margin-top:14px;line-height:1.45;}
   @media(max-width:600px){
     .board{padding:12px;gap:12px;}.column{min-width:240px;width:240px;}
     header h1{font-size:1rem;}.side-drawer{max-width:100%;}
@@ -234,7 +254,8 @@
   <div class="header-right">
     <span id="today"></span>
     <button class="hdr-btn" id="select-mode-btn" style="display:none" onclick="toggleSelectMode()">☑️ Sélection</button>
-    <button class="hdr-btn" id="archive-btn"      style="display:none" onclick="openArchive()">🗄️ Archives</button>
+    <button class="hdr-btn" id="categories-btn"  style="display:none" onclick="openCategoriesPanel()">🏷️ Catégories</button>
+    <button class="hdr-btn" id="archive-btn"     style="display:none" onclick="openArchive()">🗄️ Archives</button>
     <button class="hdr-btn" id="logout-btn"       style="display:none" onclick="logout()">⏻ Déconnexion</button>
   </div>
 </header>
@@ -299,6 +320,21 @@
   </div>
 </div>
 
+<!-- Categories management panel -->
+<div class="side-panel" id="categories-panel">
+  <div class="side-drawer">
+    <button class="drawer-close" onclick="closeCategoriesPanel()">✕</button>
+    <h2>🏷️ Catégories</h2>
+    <p>Gérez la liste des catégories disponibles pour vos tâches.</p>
+    <div id="categories-list"></div>
+    <div class="category-add">
+      <input id="new-category" placeholder="Nouvelle catégorie…" onkeydown="if(event.key==='Enter')addCategoryFromInput()" maxlength="50"/>
+      <button onclick="addCategoryFromInput()">+ Ajouter</button>
+    </div>
+    <p class="cat-hint">Renommer une catégorie met à jour toutes les tâches concernées. Supprimer une catégorie laisse les tâches associées sans catégorie.</p>
+  </div>
+</div>
+
 <!-- Archive panel -->
 <div class="side-panel" id="archive-panel">
   <div class="side-drawer">
@@ -338,7 +374,7 @@
     <div class="form-group"><label>Priorité</label>
       <select id="f-priority"><option value="low">Basse</option><option value="normal" selected>Normale</option><option value="high">Haute</option></select>
     </div>
-    <div class="form-group"><label>Catégorie</label><input id="f-category" placeholder="ex : Design, Dev…"/></div>
+    <div class="form-group"><label>Catégorie</label><select id="f-category"><option value="">— Aucune —</option></select></div>
     <div class="form-group"><label>Date d'échéance</label><input id="f-due" type="date"/></div>
     <div class="form-group"><label>Couleur du post-it</label><div class="color-row" id="color-row"></div></div>
     <div class="btn-row">
@@ -393,6 +429,9 @@ const LOGIC_MODE = "and";   // "and" | "or" — logic between priority and categ
 const FILTER_MODE = "dim";  // "hide" | "dim"  — non-matching cards are faded vs removed
 const PRIORITIES = [{id:"high",label:"Haute"},{id:"normal",label:"Normale"},{id:"low",label:"Basse"}];
 
+// ── CATEGORIES STATE ───────────────────────────────────────────────────────────────
+let categories = [];   // array of {id, name, position}
+
 document.getElementById("today").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -444,12 +483,12 @@ const api={
 function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
   document.getElementById("filter-bar").classList.add("hidden");
-  ["logout-btn","archive-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="none");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
   document.getElementById("filter-bar").classList.remove("hidden");
-  ["logout-btn","archive-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
 }
 async function doLogin(){
   const u=document.getElementById("l-user").value.trim(), p=document.getElementById("l-pass").value;
@@ -459,7 +498,7 @@ async function doLogin(){
     const remember=document.getElementById("l-remember").checked;
     await api.post("/api/login",{username:u,password:p,remember});
     document.getElementById("l-pass").value="";
-    hideLogin(); loadBoard();
+    hideLogin(); await loadCategories(); loadBoard();
   }catch(e){
     errEl.textContent=e.message==="ratelimit"
       ? "Trop de tentatives. Réessayez dans quelques minutes."
@@ -1016,6 +1055,96 @@ async function refreshArchive(){
 async function restoreTask(id){try{await api.post(`/api/tasks/${id}/unarchive`,{});await Promise.all([refreshArchive(),loadBoard()]);}catch(err){if(err.message!=="unauth")toast("Erreur lors de la restauration.",true);}}
 async function deleteArchivedTask(id){if(!confirm("Supprimer définitivement ?"))return;try{await api.del(`/api/tasks/${id}`);await refreshArchive();}catch(err){if(err.message!=="unauth")toast("Erreur lors de la suppression.",true);}}
 
+// ── CATEGORIES ────────────────────────────────────────────────────────────────
+async function loadCategories(){
+  try{categories=(await api.get("/api/categories"))||[];}
+  catch(e){if(e.message!=="unauth")toast("Impossible de charger les catégories.",true);}
+}
+function populateCategorySelect(selectEl,current=""){
+  if(!selectEl)return;
+  let html=`<option value="">— Aucune —</option>`;
+  html+=categories.map(c=>`<option value="${esc(c.name)}"${c.name===current?" selected":""}>${esc(c.name)}</option>`).join("");
+  // Preserve a legacy/stale value as a fallback option so the user sees it and can change it
+  if(current&&!categories.find(c=>c.name===current)){
+    html+=`<option value="${esc(current)}" selected>${esc(current)} (obsolète)</option>`;
+  }
+  selectEl.innerHTML=html;
+}
+async function openCategoriesPanel(){
+  await loadCategories();
+  document.getElementById("categories-panel").classList.add("open");
+  refreshCategoriesPanel();
+  setTimeout(()=>document.getElementById("new-category").focus(),100);
+}
+function closeCategoriesPanel(){document.getElementById("categories-panel").classList.remove("open");}
+function countTasksByCategory(name){return Object.values(tasks).flat().filter(t=>t.category===name).length;}
+function refreshCategoriesPanel(){
+  const list=document.getElementById("categories-list"); list.innerHTML="";
+  if(!categories.length){list.innerHTML=`<div class="cat-empty">Aucune catégorie pour l'instant. Créez-en une ci-dessous.</div>`;return;}
+  categories.forEach(cat=>{
+    const count=countTasksByCategory(cat.name);
+    const row=document.createElement("div"); row.className="category-item"; row.dataset.id=cat.id;
+    row.innerHTML=`
+      <input class="category-name" value="${esc(cat.name)}" readonly data-original="${esc(cat.name)}" maxlength="50"/>
+      <span class="category-count">${count} tâche${count>1?"s":""}</span>
+      <div class="category-actions">
+        <button class="btn-cat-edit" title="Renommer" onclick="startEditCategory(${cat.id})">✏️</button>
+        <button class="btn-cat-del" title="Supprimer" onclick="deleteCategoryUI(${cat.id})">🗑️</button>
+      </div>`;
+    list.appendChild(row);
+  });
+}
+function startEditCategory(id){
+  const row=document.querySelector(`.category-item[data-id="${id}"]`); if(!row)return;
+  row.classList.add("editing");
+  const input=row.querySelector(".category-name");
+  input.readOnly=false; input.focus(); input.select();
+  const actions=row.querySelector(".category-actions");
+  actions.innerHTML=`
+    <button class="btn-cat-save" title="Valider" onclick="saveCategoryEdit(${id})">✓</button>
+    <button class="btn-cat-cancel" title="Annuler" onclick="cancelCategoryEdit(${id})">✕</button>`;
+  input.onkeydown=e=>{
+    if(e.key==="Enter"){e.preventDefault();saveCategoryEdit(id);}
+    else if(e.key==="Escape"){e.preventDefault();cancelCategoryEdit(id);}
+  };
+}
+async function saveCategoryEdit(id){
+  const row=document.querySelector(`.category-item[data-id="${id}"]`); if(!row)return;
+  const input=row.querySelector(".category-name");
+  const newName=input.value.trim(); const original=input.dataset.original;
+  if(newName===original){cancelCategoryEdit(id);return;}
+  if(!newName){input.focus();return;}
+  try{
+    await api.patch(`/api/categories/${id}`,{name:newName});
+    await loadCategories(); refreshCategoriesPanel();
+    await loadBoard();   // tags on cards and filter chips reflect the new name
+  }catch(e){if(e.message!=="unauth"){input.value=original;}}
+}
+function cancelCategoryEdit(id){refreshCategoriesPanel();}
+async function addCategoryFromInput(){
+  const input=document.getElementById("new-category"); const name=input.value.trim();
+  if(!name){input.focus();return;}
+  try{
+    await api.post("/api/categories",{name});
+    input.value=""; await loadCategories(); refreshCategoriesPanel(); input.focus();
+  }catch(e){if(e.message!=="unauth")input.focus();}
+}
+async function deleteCategoryUI(id){
+  const cat=categories.find(c=>c.id===id); if(!cat)return;
+  const count=countTasksByCategory(cat.name);
+  const msg=count>0
+    ? `Supprimer « ${cat.name} » ?\nLes ${count} tâche${count>1?"s":""} associée${count>1?"s":""} resteront sans catégorie.`
+    : `Supprimer « ${cat.name} » ?`;
+  if(!confirm(msg))return;
+  try{
+    await api.del(`/api/categories/${id}`);
+    // Drop from active filters if it was selected
+    activeFilters.category.delete(cat.name);
+    await loadCategories(); refreshCategoriesPanel();
+    if(count>0)await loadBoard();
+  }catch(e){/* toast already shown */}
+}
+
 // ── BULK MODAL ────────────────────────────────────────────────────────────────
 const bulkTitles={color:"🎨 Changer la couleur",category:"🏷️ Changer la catégorie",priority:"⚡ Changer la priorité",due_date:"📅 Changer la date d'échéance",column:"📂 Déplacer vers une colonne"};
 function openBulkModal(field){
@@ -1029,7 +1158,11 @@ function openBulkModal(field){
     const none=document.createElement("div");none.className="color-swatch none-swatch selected";none.textContent="—";none.dataset.color="";
     none.onclick=()=>{document.querySelectorAll("#bulk-color-row .color-swatch").forEach(s=>s.classList.remove("selected"));none.classList.add("selected");};bcr.appendChild(none);
     COLORS.forEach(c=>{const s=document.createElement("div");s.className="color-swatch";s.style.background=c;s.dataset.color=c;if(c==="#fff")s.style.border="1.5px solid #e4e4e7";s.onclick=()=>{document.querySelectorAll("#bulk-color-row .color-swatch").forEach(x=>x.classList.remove("selected"));s.classList.add("selected");};bcr.appendChild(s);});
-  }else if(field==="category"){fields.innerHTML=`<div class="form-group"><label>Catégorie</label><input id="bulk-category"/><p class="hint">Laissez vide pour ne pas modifier.</p></div>`;}
+  }else if(field==="category"){
+    const clearOpt = `<option value="__clear__">— Aucune (effacer le champ) —</option>`;
+    const opts = categories.map(c=>`<option value="${esc(c.name)}">${esc(c.name)}</option>`).join("");
+    fields.innerHTML=`<div class="form-group"><label>Catégorie</label><select id="bulk-category"><option value="">— Ne pas modifier —</option>${clearOpt}${opts}</select></div>`;
+  }
   else if(field==="priority"){fields.innerHTML=`<div class="form-group"><label>Priorité</label><select id="bulk-priority"><option value="">— Ne pas modifier —</option><option value="low">Basse</option><option value="normal">Normale</option><option value="high">Haute</option></select></div>`;}
   else if(field==="due_date"){fields.innerHTML=`<div class="form-group"><label>Date d'échéance</label><input id="bulk-due" type="date"/><p class="hint">Laissez vide pour ne pas modifier.</p></div>`;}
   else if(field==="column"){const opts=COLS.map(c=>`<option value="${c.id}">${c.label}</option>`).join("");fields.innerHTML=`<div class="form-group"><label>Colonne</label><select id="bulk-col"><option value="">— Choisir —</option>${opts}</select></div>`;}
@@ -1040,7 +1173,7 @@ async function applyBulk(){
   if(!bulkField||!selectedIds.size)return;
   const ids=[...selectedIds]; let patch={};
   if(bulkField==="color"){const sel=document.querySelector("#bulk-color-row .color-swatch.selected");const c=sel?.dataset.color;if(!c){closeBulkModal();return;}patch.color=c;}
-  else if(bulkField==="category"){const v=document.getElementById("bulk-category").value.trim();if(!v){closeBulkModal();return;}patch.category=v;}
+  else if(bulkField==="category"){const v=document.getElementById("bulk-category").value;if(v===""){closeBulkModal();return;}patch.category=(v==="__clear__")?"":v;}
   else if(bulkField==="priority"){const v=document.getElementById("bulk-priority").value;if(!v){closeBulkModal();return;}patch.priority=v;}
   else if(bulkField==="due_date"){const v=document.getElementById("bulk-due").value;if(!v){closeBulkModal();return;}patch.due_date=v;}
   else if(bulkField==="column"){const v=document.getElementById("bulk-col").value;if(!v)return;patch.column=v;}
@@ -1065,7 +1198,8 @@ function openNew(){
   // Hide column selector for new tasks (always backlog) but set value explicitly
   document.getElementById("f-col").value="backlog";
   document.getElementById("col-field").style.display="none";
-  document.getElementById("f-priority").value="normal"; document.getElementById("f-category").value="";
+  document.getElementById("f-priority").value="normal";
+  populateCategorySelect(document.getElementById("f-category"),"");
   document.getElementById("f-due").value=""; document.getElementById("btn-delete").style.display="none";
   document.getElementById("btn-archive").style.display="none"; document.getElementById("comments-area").style.display="none";
   setColor(COLORS[0]); document.getElementById("overlay").classList.add("open");
@@ -1078,7 +1212,8 @@ async function openEdit(id){
     document.getElementById("modal-title").textContent="Modifier la tâche";
     document.getElementById("f-title").value=t.title; document.getElementById("f-desc").value=t.description||"";
     document.getElementById("f-col").value=t.column; document.getElementById("col-field").style.display="block";
-    document.getElementById("f-priority").value=t.priority||"normal"; document.getElementById("f-category").value=t.category||"";
+    document.getElementById("f-priority").value=t.priority||"normal";
+    populateCategorySelect(document.getElementById("f-category"),t.category||"");
     document.getElementById("f-due").value=t.due_date||""; document.getElementById("btn-delete").style.display="inline-flex";
     document.getElementById("btn-archive").style.display=ARCHIVABLE.includes(t.column)?"inline-flex":"none";
     setColor(t.color||COLORS[0]); document.getElementById("comments-area").style.display="block";
@@ -1135,6 +1270,7 @@ function findTaskCol(id){for(const[col,items]of Object.entries(tasks))if(items.f
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeModal();});
 document.getElementById("bulk-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeBulkModal();});
 document.getElementById("archive-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeArchive();});
+document.getElementById("categories-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeCategoriesPanel();});
 document.getElementById("stack-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeStackPanel();});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1142,7 +1278,7 @@ function darken(hex){let c=hex.replace("#","");if(c.length===3)c=c.split("").map
 function esc(s){return(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-api.get("/api/me").then(()=>{hideLogin();loadBoard();}).catch(()=>showLogin());
+api.get("/api/me").then(async()=>{hideLogin(); await loadCategories(); loadBoard();}).catch(()=>showLogin());
 </script>
 </body>
 </html>

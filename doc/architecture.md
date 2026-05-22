@@ -45,6 +45,22 @@ file server. All API routes are prefixed `/api/`.
 | `content` | TEXT | Free text; system comments prefixed `🚧` or `✅` |
 | `created_at` | TEXT | ISO datetime |
 
+### `categories`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INTEGER PK AUTOINCREMENT | |
+| `name` | TEXT NOT NULL UNIQUE | The canonical label; tasks reference categories by this string in `tasks.category` |
+| `position` | INTEGER NOT NULL DEFAULT 0 | Display order in the management drawer and dropdown |
+
+**Curated list (strict mode)** — `POST/PATCH /api/tasks` reject any non-empty `category`
+that does not match a row in this table. Renaming a category propagates to every task
+that referenced the old name in the same transaction. Deleting a category clears the
+field on affected tasks (silent: no reassignment prompt).
+
+**Seed migration** — on first startup with this table empty, distinct non-empty
+`category` values from existing tasks are imported, ordered by usage descending.
+
 ---
 
 ## Stack model

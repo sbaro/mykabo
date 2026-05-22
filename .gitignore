@@ -1,3 +1,4 @@
 kanban_data
 .DS_Store
 secrets.env
+.claude

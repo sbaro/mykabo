@@ -60,12 +60,13 @@ Returns all archived tasks ordered by `archived_at DESC`.
   "description": "",
   "column": "backlog",
   "color": "#fef08a",
-  "category": "",
+  "category": "",       // must be "" or match an existing category name (see /api/categories)
   "priority": "normal",   // low | normal | high
   "due_date": null        // "YYYY-MM-DD" or null
 }
 ```
-Returns the created task object.
+Returns the created task object. Returns **400** if `category` is non-empty and does not match
+an existing entry in the `categories` table.
 
 ### `GET /api/tasks/{id}`
 Returns the task with its `comments` array attached.
@@ -73,6 +74,9 @@ Returns the task with its `comments` array attached.
 ### `PATCH /api/tasks/{id}`
 Partial update. Only fields in `_TASK_WRITABLE` are accepted:
 `title`, `description`, `column`, `color`, `category`, `priority`, `due_date`, `position`, `stack_id`, `stack_pos`.
+
+`category` is validated against the `categories` table when present — send `""` to clear it, or
+an existing category name to set it. Unknown names return **400**.
 
 Returns the updated task object.
 
@@ -85,6 +89,50 @@ Sets `archived=1`, `archived_at=now()`, `stack_id=NULL`. Dissolves the stack if 
 
 ### `POST /api/tasks/{id}/unarchive`
 Sets `archived=0`, `archived_at=NULL`.
+
+---
+
+## Categories
+
+The list of allowed `category` values is curated by the user. Tasks reference categories
+by **name** (not by id) so legacy data keeps working; renaming a category propagates to
+every task that uses it, and deleting one clears the field on affected tasks silently.
+
+### `GET /api/categories`
+Returns the list of categories ordered by `position` then `name`:
+```json
+[ { "id": 1, "name": "Dev",       "position": 0 },
+  { "id": 2, "name": "Design",    "position": 1 },
+  { "id": 3, "name": "Marketing", "position": 2 } ]
+```
+
+### `POST /api/categories` → 201
+```json
+// Request
+{ "name": "Recherche" }
+```
+Validations: name is trimmed; non-empty; ≤ 50 chars; unique. Returns the created object.
+
+| Status | Cause |
+|--------|-------|
+| 400 | Empty name or > 50 chars |
+| 409 | A category with that name already exists |
+
+### `PATCH /api/categories/{cat_id}`
+```json
+// Request — any subset of:
+{ "name": "Dev backend", "position": 3 }
+```
+When `name` is changed, **all tasks** with the old name are updated to the new one in the same
+transaction. Validations match `POST`.
+
+### `DELETE /api/categories/{cat_id}` → 204
+Sets `category=''` on every task that referenced this category, then deletes the row. Silent
+behaviour by design — no `409` even when tasks are using the category.
+
+### Migration
+On first startup after the categories table is created, the backend seeds it from the distinct
+non-empty `category` values found in existing tasks (ordered by usage, then alphabetical).
 
 ---
 

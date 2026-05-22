@@ -43,7 +43,7 @@
   .drop-indicator{height:3px;border-radius:2px;background:var(--accent);margin:-4px 0;opacity:0;transition:opacity .1s;pointer-events:none;}
   .drop-indicator.visible{opacity:1;}
   .card.stack-target{outline:2.5px dashed #8b5cf6;outline-offset:3px;background-image:repeating-linear-gradient(135deg,rgba(139,92,246,.06) 0px,rgba(139,92,246,.06) 4px,transparent 4px,transparent 10px);}
-  .card.stack-target::after{content:'📚 Empiler';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:700;color:#6d28d9;background:rgba(237,233,254,.55);border-radius:6px;pointer-events:none;letter-spacing:.3px;}
+  .card.stack-target::after{content:'📚 Empiler';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;color:#fff;background:rgba(109,40,217,.75);border-radius:6px;pointer-events:none;letter-spacing:.5px;text-shadow:0 1px 3px rgba(0,0,0,.3);}
   .archive-all-btn{margin:0 8px 4px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:8px;padding:7px;cursor:pointer;font-size:.82rem;color:#16a34a;font-weight:600;transition:all .15s;width:calc(100% - 16px);}
   .archive-all-btn:hover{background:#dcfce7;border-color:#86efac;}
   .add-task-btn{margin:4px 8px 8px;background:transparent;border:1.5px dashed #a1a1aa;border-radius:8px;padding:7px;cursor:pointer;font-size:.82rem;color:var(--muted);transition:all .15s;width:calc(100% - 16px);}
@@ -324,6 +324,7 @@ let pendingBlock=null;
 let selectMode=false, selectedIds=new Set(), bulkField=null;
 let browsingStackId=null;
 let stackHoverTarget=null;
+let stackDropTarget=null;   // mirrors stackHoverTarget but is NEVER cleared by dragleave
 
 document.getElementById("today").textContent=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
 
@@ -588,25 +589,30 @@ function setupColDrop(body,colId){
       if(!isSelf&&!selectMode&&draggedId!==null&&relY>third&&relY<third*2){
         handleStackHover(card,cardId);
       }else{
-        clearStackHover();
+        clearStackHover(); stackDropTarget=null;
         if(relY<=rect.height/2){const prev=card.previousElementSibling;if(prev&&prev.classList.contains("drop-indicator"))prev.classList.add("visible");}
         else{const next=card.nextElementSibling;if(next&&next.classList.contains("drop-indicator"))next.classList.add("visible");}
       }
       matched=true; break;
     }
-    if(!matched){clearStackHover();const last=body.querySelector(".drop-indicator:last-child");if(last)last.classList.add("visible");}
+    if(!matched){clearStackHover(); stackDropTarget=null; const last=body.querySelector(".drop-indicator:last-child");if(last)last.classList.add("visible");}
   });
   body.addEventListener("dragleave",e=>{
-    if(!body.contains(e.relatedTarget)){body.querySelectorAll(".drop-indicator").forEach(i=>i.classList.remove("visible"));clearStackHover();}
+    // Guard: relatedTarget can be null in Chrome right before a drop fires,
+    // which would wrongly clear stackHoverTarget and break pile creation.
+    if(e.relatedTarget!==null&&!body.contains(e.relatedTarget)){body.querySelectorAll(".drop-indicator").forEach(i=>i.classList.remove("visible"));clearStackHover();}
   });
   body.addEventListener("drop",async e=>{
     e.preventDefault();
     body.querySelectorAll(".drop-indicator").forEach(i=>i.classList.remove("visible"));
-    const wasStackHover=stackHoverTarget; clearStackHover();
+    clearStackHover();
+    const wasStackDrop=stackDropTarget; stackDropTarget=null;
 
-    // Stack by dropping on middle third
-    if(wasStackHover&&draggedId!==null&&wasStackHover!==draggedId&&!selectMode){
-      resetDragState(); await stackTwoTasks(wasStackHover,draggedId); return;
+    // Stack by dropping on middle third.
+    // Uses stackDropTarget (set by dragover, never cleared by dragleave) so that
+    // Safari's spurious pre-drop dragleave cannot break pile creation.
+    if(wasStackDrop!==null&&draggedId!==null&&wasStackDrop!==draggedId&&!selectMode){
+      const droppedId=draggedId; resetDragState(); await stackTwoTasks(wasStackDrop,droppedId); return;
     }
 
     // Move whole stack
@@ -647,13 +653,15 @@ function setupColDrop(body,colId){
   });
 }
 
-function resetDragState(){draggedId=null;draggedFromCol=null;draggedStackId=null;}
+function resetDragState(){draggedId=null;draggedFromCol=null;draggedStackId=null;stackDropTarget=null;}
 
 function handleStackHover(cardEl,targetId){
   if(stackHoverTarget===targetId)return;
-  clearStackHover(); stackHoverTarget=targetId; cardEl.classList.add("stack-target");
+  clearStackHover(); stackHoverTarget=targetId; stackDropTarget=targetId; cardEl.classList.add("stack-target");
 }
 function clearStackHover(){
+  // Only clears visual state + stackHoverTarget. Never touches stackDropTarget —
+  // that variable must survive Safari's pre-drop dragleave.
   if(stackHoverTarget!==null){document.querySelectorAll(".card.stack-target").forEach(c=>c.classList.remove("stack-target"));stackHoverTarget=null;}
 }
 

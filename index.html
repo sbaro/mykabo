@@ -39,6 +39,19 @@
   .column{background:var(--col-bg);border-radius:var(--radius);min-width:260px;width:260px;flex-shrink:0;display:flex;flex-direction:column;}
   .col-header{padding:12px 14px;font-weight:700;font-size:.82rem;letter-spacing:.8px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;border-radius:var(--radius) var(--radius) 0 0;}
   .col-header .badge{background:rgba(0,0,0,.15);border-radius:99px;padding:2px 8px;font-size:.72rem;}
+  .col-header{position:relative;}
+  .col-header .col-header-right{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+  /* WIP badge states */
+  .badge-wip-full{background:#fbbf24!important;color:#78350f!important;}
+  .badge-wip-over{background:#ef4444!important;color:#fff!important;animation:wip-pulse 1.4s ease-in-out infinite;}
+  @keyframes wip-pulse{0%,100%{opacity:1}50%{opacity:.65}}
+  /* Red bottom stripe on the header when over limit */
+  .col-wip-over::after{content:"";position:absolute;bottom:0;left:0;right:0;height:3px;background:#ef4444;border-radius:0;}
+  /* Gear button */
+  .wip-cfg{background:none;border:none;cursor:pointer;font-size:.82rem;opacity:.38;padding:0;line-height:1;color:inherit;flex-shrink:0;}
+  .wip-cfg:hover{opacity:1;}
+  /* WIP modal input */
+  .wip-modal-input{width:100%;padding:10px 12px;border:1.5px solid #e4e4e7;border-radius:8px;font-size:1rem;font-family:var(--font);outline:none;text-align:center;}
   .col-body{padding:8px;display:flex;flex-direction:column;gap:8px;min-height:60px;}
   .drop-indicator{height:3px;border-radius:2px;background:var(--accent);margin:-4px 0;opacity:0;transition:opacity .1s;pointer-events:none;}
   .drop-indicator.visible{opacity:1;}
@@ -398,6 +411,20 @@
 </div>
 
 <!-- Block reason modal -->
+<div class="block-overlay" id="wip-overlay" onclick="if(event.target===this)closeWipModal()">
+  <div class="block-modal" style="max-width:320px;text-align:center">
+    <h2 id="wip-modal-title" style="margin-bottom:8px">⚙ Limite WIP</h2>
+    <p>Nombre maximum de tâches dans cette colonne.<br>Laissez vide pour désactiver.</p>
+    <input id="wip-input" class="wip-modal-input" type="number" min="1" max="99"
+           placeholder="Pas de limite"
+           onkeydown="if(event.key==='Enter')saveWipLimit();if(event.key==='Escape')closeWipModal()">
+    <div class="btn-row" style="margin-top:18px;justify-content:center;gap:8px">
+      <button class="btn btn-ghost" onclick="closeWipModal()">Annuler</button>
+      <button class="btn" style="background:var(--accent);color:#fff" onclick="saveWipLimit()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <div class="block-overlay" id="block-overlay">
   <div class="block-modal">
     <h2>🚧 Cause du blocage</h2>
@@ -416,6 +443,7 @@ const COLS=[{id:"backlog",label:"Backlog"},{id:"todo",label:"To Do"},{id:"inprog
 const ARCHIVABLE=["done","abandoned"];
 
 let currentTaskId=null, selectedColor=COLORS[0], tasks={};
+let wipLimits={}, wipEditingCol=null;
 let draggedId=null, draggedFromCol=null, draggedStackId=null;
 let pendingBlock=null;
 let selectMode=false, selectedIds=new Set(), bulkField=null;
@@ -673,6 +701,31 @@ async function confirmBlock(){
     await loadBoard();
   }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'enregistrement du blocage.",true);}
 }
+// ── WIP LIMITS ────────────────────────────────────────────────────────────────
+function openWipModal(colId){
+  wipEditingCol=colId;
+  const col=COLS.find(c=>c.id===colId);
+  document.getElementById("wip-modal-title").textContent=`⚙ Limite WIP — ${col?.label||colId}`;
+  const inp=document.getElementById("wip-input");
+  inp.value=wipLimits[colId]??""
+  document.getElementById("wip-overlay").classList.add("open");
+  setTimeout(()=>{inp.focus();inp.select();},50);
+}
+function closeWipModal(){
+  document.getElementById("wip-overlay").classList.remove("open");
+  wipEditingCol=null;
+}
+async function saveWipLimit(){
+  if(!wipEditingCol)return;
+  const raw=document.getElementById("wip-input").value.trim();
+  const max_tasks=raw===""?null:Math.max(1,parseInt(raw)||1);
+  try{
+    wipLimits=await api.patch(`/api/wip_limits/${wipEditingCol}`,{max_tasks});
+    closeWipModal();
+    renderBoard();
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors de la sauvegarde de la limite.",true);}
+}
+
 async function handleUnblock(taskId,newCol){
   const label=COLS.find(c=>c.id===newCol)?.label||newCol;
   await api.post(`/api/tasks/${taskId}/comments`,{content:`✅ [DÉBLOQUÉ le ${new Date().toLocaleString("fr-FR")}] — Déplacé vers "${label}"`});
@@ -681,7 +734,10 @@ async function handleUnblock(taskId,newCol){
 // ── BOARD ─────────────────────────────────────────────────────────────────────
 async function loadBoard(){
   try{
-    tasks=await api.get("/api/tasks");
+    [tasks,wipLimits]=await Promise.all([
+      api.get("/api/tasks"),
+      api.get("/api/wip_limits"),
+    ]);
     renderBoard();
   }catch(e){
     if(e.message!=="unauth")toast("Impossible de charger le tableau.",true);
@@ -708,10 +764,27 @@ function renderBoard(){
     const reps=getStackRepresentatives(allItems);
     const visibleReps=(filterActive&&!dimMode)?reps.filter(t=>taskOrStackMatches(t)):reps;
     const el=document.createElement("div"); el.className=`column col-${col.id}`;
-    const matchCount=filterActive?reps.filter(t=>taskOrStackMatches(t)).length:allItems.length;
-    const badge=filterActive?`${matchCount}/${allItems.length}`:`${allItems.length}`;
+    const matchCount=reps.filter(t=>taskOrStackMatches(t)).length;
+    const limit=wipLimits[col.id];
+    const count=allItems.length;
+    const wipOver=limit!=null&&count>limit;
+    const wipFull=limit!=null&&count===limit;
+    const wipBadgeClass=wipOver?" badge-wip-over":wipFull?" badge-wip-full":"";
+    // Deux badges indépendants :
+    // • filterBadge : visible seulement quand un filtre est actif (matchs / total)
+    // • countBadge  : compteur simple, ou total / limite si WIP actif
+    const filterBadge=filterActive?`<span class="badge">${matchCount}/${count}</span>`:""; 
+    const countBadge=limit!=null
+      ?`<span class="badge${wipBadgeClass}">${count} / ${limit}</span>`
+      :filterActive?"":`<span class="badge">${count}</span>`;
     el.innerHTML=`
-      <div class="col-header">${col.label}<span class="badge">${badge}</span></div>
+      <div class="col-header${wipOver?" col-wip-over":""}">
+        ${col.label}
+        <div class="col-header-right">
+          ${filterBadge}${countBadge}
+          <button class="wip-cfg" title="${limit!=null?`Limite WIP : ${limit}`:"Définir une limite WIP"}" onclick="openWipModal('${col.id}')">⚙</button>
+        </div>
+      </div>
       <div class="col-body" id="col-${col.id}" data-col="${col.id}"></div>
       ${ARCHIVABLE.includes(col.id)&&allItems.length>0?`<button class="archive-all-btn" onclick="archiveAll('${col.id}')">🗄️ Tout archiver (${allItems.length})</button>`:""}
       ${col.id==="backlog"?`<button class="add-task-btn" onclick="openNew()">+ Ajouter une tâche</button>`:""}

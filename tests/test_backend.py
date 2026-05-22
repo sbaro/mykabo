@@ -469,3 +469,51 @@ class TestCategories:
     def test_update_category_not_found(self, auth):
         r = auth.patch("/api/categories/99999", json={"name": "X"})
         assert r.status_code == 404
+
+
+# ─── WIP Limits ───────────────────────────────────────────────────────────────
+
+class TestWipLimits:
+
+    def test_get_wip_limits_empty(self, auth):
+        r = auth.get("/api/wip_limits")
+        assert r.status_code == 200
+        assert r.json() == {}
+
+    def test_set_wip_limit(self, auth):
+        r = auth.patch("/api/wip_limits/inprogress", json={"max_tasks": 3})
+        assert r.status_code == 200
+        assert r.json()["inprogress"] == 3
+
+    def test_set_wip_limit_unknown_column(self, auth):
+        r = auth.patch("/api/wip_limits/nonexistent", json={"max_tasks": 3})
+        assert r.status_code == 400
+
+    def test_remove_wip_limit_with_null(self, auth):
+        auth.patch("/api/wip_limits/inprogress", json={"max_tasks": 3})
+        r = auth.patch("/api/wip_limits/inprogress", json={"max_tasks": None})
+        assert r.status_code == 200
+        assert "inprogress" not in r.json()
+
+    def test_remove_wip_limit_with_zero(self, auth):
+        auth.patch("/api/wip_limits/todo", json={"max_tasks": 5})
+        r = auth.patch("/api/wip_limits/todo", json={"max_tasks": 0})
+        assert r.status_code == 200
+        assert "todo" not in r.json()
+
+    def test_multiple_columns_can_have_limits(self, auth):
+        auth.patch("/api/wip_limits/todo", json={"max_tasks": 4})
+        auth.patch("/api/wip_limits/inprogress", json={"max_tasks": 2})
+        r = auth.get("/api/wip_limits")
+        d = r.json()
+        assert d["todo"] == 4
+        assert d["inprogress"] == 2
+
+    def test_overwrite_existing_limit(self, auth):
+        auth.patch("/api/wip_limits/todo", json={"max_tasks": 5})
+        r = auth.patch("/api/wip_limits/todo", json={"max_tasks": 10})
+        assert r.json()["todo"] == 10
+
+    def test_wip_limit_requires_auth(self, client):
+        r = client.get("/api/wip_limits")
+        assert r.status_code == 401

@@ -149,6 +149,10 @@ def init_db():
         token      TEXT PRIMARY KEY,
         expires_at REAL NOT NULL
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS wip_limits (
+        col_id    TEXT PRIMARY KEY,
+        max_tasks INTEGER NOT NULL CHECK(max_tasks > 0)
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS categories (
         id       INTEGER PRIMARY KEY AUTOINCREMENT,
         name     TEXT NOT NULL UNIQUE,
@@ -205,6 +209,9 @@ class CommentCreate(BaseModel):
 
 class StackCreate(BaseModel):
     task_ids: list[int]
+
+class WipLimitUpdate(BaseModel):
+    max_tasks: Optional[int] = None   # None or ≤0  removes the limit
 
 class CategoryCreate(BaseModel):
     name: str
@@ -399,6 +406,32 @@ def delete_task(task_id: int, session: str = Depends(require_auth)):
                 conn.execute("UPDATE tasks SET stack_id=NULL, stack_pos=0 WHERE id=?", (r["id"],))
     conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
     conn.commit(); conn.close()
+
+# ─── WIP LIMITS ───────────────────────────────────────────────────────────────
+@app.get("/api/wip_limits")
+def get_wip_limits(session: str = Depends(require_auth)):
+    conn = get_db()
+    rows = conn.execute("SELECT col_id, max_tasks FROM wip_limits").fetchall()
+    conn.close()
+    return {r["col_id"]: r["max_tasks"] for r in rows}
+
+@app.patch("/api/wip_limits/{col_id}")
+def set_wip_limit(col_id: str, body: WipLimitUpdate,
+                  session: str = Depends(require_auth)):
+    if col_id not in COLUMNS:
+        raise HTTPException(400, f"Colonne inconnue : {col_id}")
+    conn = get_db()
+    if body.max_tasks is None or body.max_tasks <= 0:
+        conn.execute("DELETE FROM wip_limits WHERE col_id=?", (col_id,))
+    else:
+        conn.execute(
+            "INSERT OR REPLACE INTO wip_limits (col_id, max_tasks) VALUES (?, ?)",
+            (col_id, body.max_tasks),
+        )
+    conn.commit()
+    rows = conn.execute("SELECT col_id, max_tasks FROM wip_limits").fetchall()
+    conn.close()
+    return {r["col_id"]: r["max_tasks"] for r in rows}
 
 # ─── CATEGORIES ───────────────────────────────────────────────────────────────
 @app.get("/api/categories")

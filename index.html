@@ -269,6 +269,7 @@
     <button class="hdr-btn" id="select-mode-btn" style="display:none" onclick="toggleSelectMode()">☑️ Sélection</button>
     <button class="hdr-btn" id="categories-btn"  style="display:none" onclick="openCategoriesPanel()">🏷️ Catégories</button>
     <button class="hdr-btn" id="archive-btn"     style="display:none" onclick="openArchive()">🗄️ Archives</button>
+    <button class="hdr-btn" id="account-btn"     style="display:none" onclick="openAccountModal()">👤 Compte</button>
     <button class="hdr-btn" id="logout-btn"       style="display:none" onclick="logout()">⏻ Déconnexion</button>
   </div>
 </header>
@@ -446,6 +447,35 @@
   </div>
 </div>
 
+<!-- Account / credentials modal -->
+<div class="overlay" id="account-overlay">
+  <div class="modal" style="max-width:420px">
+    <h2>👤 Mon compte</h2>
+    <p class="subtitle">Modifiez votre nom d'utilisateur ou votre mot de passe.</p>
+    <div class="form-group">
+      <label>Mot de passe actuel *</label>
+      <input id="acc-current-pass" type="password" placeholder="Mot de passe actuel" onkeydown="if(event.key==='Enter')saveCredentials()"/>
+    </div>
+    <hr class="separator"/>
+    <div class="form-group">
+      <label>Nouveau nom d'utilisateur</label>
+      <input id="acc-new-username" placeholder="Laisser vide pour ne pas changer" maxlength="50"/>
+    </div>
+    <div class="form-group">
+      <label>Nouveau mot de passe</label>
+      <input id="acc-new-pass" type="password" placeholder="Laisser vide pour ne pas changer"/>
+    </div>
+    <div class="form-group">
+      <label>Confirmer le nouveau mot de passe</label>
+      <input id="acc-confirm-pass" type="password" placeholder="Répétez le nouveau mot de passe" onkeydown="if(event.key==='Enter')saveCredentials()"/>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="closeAccountModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveCredentials()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const COLORS=["#fef08a","#bbf7d0","#bfdbfe","#fecaca","#e9d5ff","#fed7aa","#f0fdf4","#fff","#fce7f3","#cffafe"];
 const COLS=[{id:"backlog",label:"Backlog"},{id:"todo",label:"To Do"},{id:"inprogress",label:"In Progress"},{id:"blocked",label:"Blocked"},{id:"done",label:"Done"},{id:"abandoned",label:"Discarded"}];
@@ -520,12 +550,12 @@ const api={
 function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
   document.getElementById("filter-bar").classList.add("hidden");
-  ["logout-btn","archive-btn","categories-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="none");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
   document.getElementById("filter-bar").classList.remove("hidden");
-  ["logout-btn","archive-btn","categories-btn","select-mode-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
 }
 async function doLogin(){
   const u=document.getElementById("l-user").value.trim(), p=document.getElementById("l-pass").value;
@@ -535,6 +565,7 @@ async function doLogin(){
     const remember=document.getElementById("l-remember").checked;
     await api.post("/api/login",{username:u,password:p,remember});
     document.getElementById("l-pass").value="";
+    currentUsername=u;
     hideLogin(); await loadCategories(); loadBoard();
   }catch(e){
     errEl.textContent=e.message==="ratelimit"
@@ -1364,19 +1395,51 @@ async function archiveCurrentTask(){
 }
 function findTaskCol(id){for(const[col,items]of Object.entries(tasks))if(items.find(t=>t.id===id))return col;return null;}
 
+// ── ACCOUNT ───────────────────────────────────────────────────────────────────
+let currentUsername="";
+function openAccountModal(){
+  document.getElementById("acc-current-pass").value="";
+  document.getElementById("acc-new-username").value="";
+  document.getElementById("acc-new-pass").value="";
+  document.getElementById("acc-confirm-pass").value="";
+  document.getElementById("acc-new-username").placeholder=currentUsername||"Laisser vide pour ne pas changer";
+  document.getElementById("account-overlay").classList.add("open");
+  setTimeout(()=>document.getElementById("acc-current-pass").focus(),50);
+}
+function closeAccountModal(){document.getElementById("account-overlay").classList.remove("open");}
+async function saveCredentials(){
+  const currentPass=document.getElementById("acc-current-pass").value;
+  const newUsername=document.getElementById("acc-new-username").value.trim();
+  const newPass=document.getElementById("acc-new-pass").value;
+  const confirmPass=document.getElementById("acc-confirm-pass").value;
+  if(!currentPass){document.getElementById("acc-current-pass").focus();return;}
+  if(!newUsername&&!newPass){toast("Renseignez au moins un champ à modifier.",true);return;}
+  if(newPass&&newPass!==confirmPass){toast("Les mots de passe ne correspondent pas.",true);document.getElementById("acc-confirm-pass").focus();return;}
+  try{
+    const body={current_password:currentPass};
+    if(newUsername)body.new_username=newUsername;
+    if(newPass)body.new_password=newPass;
+    const r=await api.patch("/api/credentials",body);
+    if(r.username)currentUsername=r.username;
+    closeAccountModal();
+    toast("Identifiants mis à jour avec succès.");
+  }catch(e){if(e.message!=="unauth")toast(e.message||"Erreur lors de la mise à jour.",true);}
+}
+
 // ── Overlay close handlers ────────────────────────────────────────────────────
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeModal();});
 document.getElementById("bulk-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeBulkModal();});
 document.getElementById("archive-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeArchive();});
 document.getElementById("categories-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeCategoriesPanel();});
 document.getElementById("stack-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeStackPanel();});
+document.getElementById("account-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeAccountModal();});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function darken(hex){let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");if(c.length!==6)return"#aaa";const n=parseInt(c,16);return`rgb(${Math.max(0,((n>>16)&0xff)-40)},${Math.max(0,((n>>8)&0xff)-40)},${Math.max(0,(n&0xff)-40)})`;}
 function esc(s){return(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-api.get("/api/me").then(async()=>{hideLogin(); await loadCategories(); loadBoard();}).catch(()=>showLogin());
+api.get("/api/me").then(async u=>{currentUsername=u.username||"";hideLogin(); await loadCategories(); loadBoard();}).catch(()=>showLogin());
 </script>
 </body>
 </html>

@@ -12,6 +12,7 @@ categories     // Array<{id, name, position}> — mirrors GET /api/categories
 activeFilters  // {priority: Set, category: Set} — chips selected in the filter bar
 selectedColor  // String: current color swatch selection (single task modal)
 currentTaskId  // Int|null: task being edited in the modal
+currentUsername // String: logged-in username, set on login and after credential change
 selectMode     // Bool: multi-select mode active
 selectedIds    // Set<int>: IDs of selected tasks
 bulkField      // String|null: current bulk-edit field type
@@ -146,6 +147,14 @@ Activated by the **☑️ Sélection** header button. In select mode:
 | Stack browse | `#stack-panel` | `openStackPanel(stackId)` |
 | Archive browse | `#archive-panel` | `openArchive()` |
 | Categories | `#categories-panel` | `openCategoriesPanel()` |
+| Account / credentials | `#account-overlay` | `openAccountModal()` (👤 Compte header button) |
+
+**Account modal** (`openAccountModal` / `closeAccountModal` / `saveCredentials`): lets the user
+change their username and/or password. Requires the current password to be confirmed. Validates
+client-side that at least one field is filled and that the new-password confirmation matches
+before calling `PATCH /api/credentials`. On success, `currentUsername` is updated in memory and
+a success toast is shown. The placeholder of the "new username" field is pre-filled with the
+current username as a visual hint.
 
 All modals close on background click. Stack, archive and categories panels are right-side drawers (`.side-panel` + `.side-drawer`).
 

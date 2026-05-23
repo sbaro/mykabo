@@ -25,6 +25,32 @@ Clears the session cookie. Returns `{ "ok": true }`.
 ### `GET /api/me`
 Returns `{ "username": "admin" }`. Used by the frontend to check auth state on load.
 
+### `PATCH /api/credentials`
+Changes the current user's username and/or password.
+
+```json
+// Request
+{
+  "current_password": "changeme",   // required — must match the current password
+  "new_username": "newname",        // optional — ≥ 3 characters
+  "new_password": "newpass123"      // optional — ≥ 6 characters
+}
+
+// Response 200
+{ "ok": true, "username": "newname" }
+```
+
+At least one of `new_username` or `new_password` must be provided. Changes are persisted in
+the `config` SQLite table and survive container restarts. The caller's current session remains
+valid after the change.
+
+| Status | Cause |
+|--------|-------|
+| 400 | Neither `new_username` nor `new_password` provided |
+| 400 | `new_username` is shorter than 3 characters |
+| 400 | `new_password` is shorter than 6 characters |
+| 401 | `current_password` does not match the stored password |
+
 ---
 
 ## Tasks

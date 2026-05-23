@@ -34,9 +34,13 @@ def clean_db():
     conn.execute("DELETE FROM tasks")
     conn.execute("DELETE FROM sessions")
     conn.execute("DELETE FROM categories")
+    conn.execute("DELETE FROM config")
     conn.commit()
     conn.close()
     main._failed.clear()
+    # Reset in-memory credentials to test defaults so credential tests don't bleed over
+    main.USERNAME = "admin"
+    main.PASS_HASH = main.hash_pass("changeme")
 
 
 @pytest.fixture
@@ -516,4 +520,87 @@ class TestWipLimits:
 
     def test_wip_limit_requires_auth(self, client):
         r = client.get("/api/wip_limits")
+        assert r.status_code == 401
+
+
+# ─── Credentials ──────────────────────────────────────────────────────────────
+
+class TestCredentials:
+
+    def test_change_password_success(self, auth):
+        r = auth.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_password": "newpass123",
+        })
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        # Old password rejected
+        assert auth.post("/api/login", json={"username": "admin", "password": "changeme"}).status_code == 401
+        # New password accepted
+        assert auth.post("/api/login", json={"username": "admin", "password": "newpass123"}).status_code == 200
+
+    def test_change_username_success(self, auth):
+        r = auth.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_username": "newadmin",
+        })
+        assert r.status_code == 200
+        assert r.json()["username"] == "newadmin"
+        # Old username rejected
+        assert auth.post("/api/login", json={"username": "admin", "password": "changeme"}).status_code == 401
+        # New username accepted
+        assert auth.post("/api/login", json={"username": "newadmin", "password": "changeme"}).status_code == 200
+
+    def test_change_username_and_password(self, auth):
+        r = auth.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_username": "superuser",
+            "new_password": "secret99",
+        })
+        assert r.status_code == 200
+        assert auth.post("/api/login", json={"username": "superuser", "password": "secret99"}).status_code == 200
+
+    def test_wrong_current_password_returns_401(self, auth):
+        r = auth.patch("/api/credentials", json={
+            "current_password": "wrongpass",
+            "new_password": "newpass123",
+        })
+        assert r.status_code == 401
+
+    def test_no_new_fields_returns_400(self, auth):
+        r = auth.patch("/api/credentials", json={"current_password": "changeme"})
+        assert r.status_code == 400
+
+    def test_username_too_short_returns_400(self, auth):
+        r = auth.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_username": "ab",
+        })
+        assert r.status_code == 400
+
+    def test_password_too_short_returns_400(self, auth):
+        r = auth.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_password": "12345",
+        })
+        assert r.status_code == 400
+
+    def test_credentials_persisted_in_db(self, auth):
+        auth.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_username": "persisted",
+            "new_password": "longpass",
+        })
+        conn = main.get_db()
+        stored_user = conn.execute("SELECT value FROM config WHERE key='username'").fetchone()
+        stored_hash = conn.execute("SELECT value FROM config WHERE key='pass_hash'").fetchone()
+        conn.close()
+        assert stored_user["value"] == "persisted"
+        assert main.verify_pass("longpass", stored_hash["value"])
+
+    def test_requires_auth(self, client):
+        r = client.patch("/api/credentials", json={
+            "current_password": "changeme",
+            "new_password": "newpass123",
+        })
         assert r.status_code == 401

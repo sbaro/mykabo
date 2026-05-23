@@ -165,6 +165,10 @@ def init_db():
         name     TEXT NOT NULL UNIQUE,
         position INTEGER NOT NULL DEFAULT 0
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS config (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )""")
     # One-time seed: import distinct categories from existing tasks
     if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
         distinct = conn.execute(
@@ -181,6 +185,21 @@ def init_db():
     conn.close()
 
 init_db()
+
+def _load_stored_credentials():
+    global USERNAME, PASS_HASH
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT key, value FROM config WHERE key IN ('username','pass_hash')"
+    ).fetchall()
+    conn.close()
+    for row in rows:
+        if row["key"] == "username":
+            USERNAME = row["value"]
+        elif row["key"] == "pass_hash":
+            PASS_HASH = row["value"]
+
+_load_stored_credentials()
 
 # ─── MODELS ───────────────────────────────────────────────────────────────────
 COLUMNS = ["backlog","todo","inprogress","blocked","done","abandoned"]
@@ -221,6 +240,11 @@ class StackCreate(BaseModel):
 
 class WipLimitUpdate(BaseModel):
     max_tasks: Optional[int] = None   # None or ≤0  removes the limit
+
+class ChangeCredentials(BaseModel):
+    current_password: str
+    new_username: Optional[str] = None
+    new_password: Optional[str] = None
 
 class CategoryCreate(BaseModel):
     name: str
@@ -295,6 +319,34 @@ def logout(response: Response, session: Optional[str] = Cookie(default=None)):
 @app.get("/api/me")
 def me(session: str = Depends(require_auth)):
     return {"username": USERNAME}
+
+@app.patch("/api/credentials")
+def change_credentials(body: ChangeCredentials, session: str = Depends(require_auth)):
+    global USERNAME, PASS_HASH
+    if not verify_pass(body.current_password, PASS_HASH):
+        raise HTTPException(401, "Mot de passe actuel incorrect")
+    new_username = body.new_username.strip() if body.new_username else None
+    new_password = body.new_password
+    if not new_username and not new_password:
+        raise HTTPException(400, "Aucune modification demandée")
+    if new_username and len(new_username) < 3:
+        raise HTTPException(400, "Le nom d'utilisateur doit comporter au moins 3 caractères")
+    if new_password and len(new_password) < 6:
+        raise HTTPException(400, "Le mot de passe doit comporter au moins 6 caractères")
+    conn = get_db()
+    if new_username:
+        USERNAME = new_username
+        conn.execute(
+            "INSERT OR REPLACE INTO config (key, value) VALUES ('username', ?)", (new_username,)
+        )
+    if new_password:
+        PASS_HASH = hash_pass(new_password)
+        conn.execute(
+            "INSERT OR REPLACE INTO config (key, value) VALUES ('pass_hash', ?)", (PASS_HASH,)
+        )
+    conn.commit()
+    conn.close()
+    return {"ok": True, "username": USERNAME}
 
 # ─── TASKS ────────────────────────────────────────────────────────────────────
 @app.get("/api/tasks")

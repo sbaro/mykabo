@@ -54,6 +54,18 @@ file server. All API routes are prefixed `/api/`.
 | `name` | TEXT NOT NULL UNIQUE | The canonical label; tasks reference categories by this string in `tasks.category` |
 | `position` | INTEGER NOT NULL DEFAULT 0 | Display order in the management drawer and dropdown |
 
+### `config`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `key` | TEXT PK | `'username'` or `'pass_hash'` |
+| `value` | TEXT NOT NULL | Stored value |
+
+Used to persist runtime credential changes made via `PATCH /api/credentials`. At startup,
+`_load_stored_credentials()` reads this table and overrides the env-var defaults (`KANBAN_USER` /
+`KANBAN_PASS`) if entries are present. Empty on fresh installs; env vars take effect until the
+first credential change.
+
 **Curated list (strict mode)** — `POST/PATCH /api/tasks` reject any non-empty `category`
 that does not match a row in this table. Renaming a category propagates to every task
 that referenced the old name in the same transaction. Deleting a category clears the
@@ -73,6 +85,15 @@ A **stack** is a logical grouping of tasks sharing a `stack_id` (random URL-safe
 - Moving a stack moves **all** tasks with that `stack_id` to the target column
 - Archiving or deleting a task that is the last member of a stack dissolves the stack automatically
 - A stack with fewer than 2 active members is automatically dissolved
+
+---
+
+## Credential management
+
+Username and password hash are held in two module-level globals (`USERNAME`, `PASS_HASH`).
+At startup they are initialised from env vars, then overridden by any rows in the `config` table.
+`PATCH /api/credentials` verifies the current password, applies the change in memory, and writes
+to `config` so the new values survive restarts. The calling session is not invalidated.
 
 ---
 

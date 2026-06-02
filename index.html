@@ -643,6 +643,32 @@ async function stackTwoTasks(targetId,droppedId){
   }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'empilement.",true);}
 }
 
+async function mergeStackOntoCard(targetCardId,sourceStackId){
+  const allTasks=Object.values(tasks).flat();
+  const target=allTasks.find(t=>t.id===targetCardId);
+  if(!target)return;
+  const sourceTasks=allTasks.filter(t=>t.stack_id===sourceStackId);
+  if(!sourceTasks.length)return;
+  const sourceIds=sourceTasks.map(t=>t.id);
+  try{
+    let allIds;
+    if(target.stack_id){
+      // Merge two stacks: target stack's column wins (target's tasks go first)
+      const targetTasks=allTasks.filter(t=>t.stack_id===target.stack_id);
+      const targetIds=targetTasks.map(t=>t.id);
+      await api.del(`/api/stacks/${target.stack_id}`);
+      await api.del(`/api/stacks/${sourceStackId}`);
+      allIds=[...targetIds,...sourceIds.filter(id=>!targetIds.includes(id))];
+    }else{
+      // Add target card at front of source stack: target's column wins
+      await api.del(`/api/stacks/${sourceStackId}`);
+      allIds=[targetCardId,...sourceIds.filter(id=>id!==targetCardId)];
+    }
+    await api.post("/api/stacks",{task_ids:allIds});
+    await loadBoard();
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors de la fusion des piles.",true);}
+}
+
 async function openStackPanel(stackId){
   browsingStackId=stackId;
   try{
@@ -940,7 +966,23 @@ function setupColDrop(body,colId){
     e.preventDefault();
     body.querySelectorAll(".drop-indicator").forEach(i=>i.classList.remove("visible"));
     if(draggedStackId!==null){
-      const last=body.querySelector(".drop-indicator:last-child"); if(last)last.classList.add("visible");
+      const allCards=[...body.querySelectorAll(".card:not(.dragging)")];
+      let matched=false;
+      for(const card of allCards){
+        const rect=card.getBoundingClientRect();
+        if(e.clientY>rect.bottom)continue;
+        const third=rect.height/3, relY=e.clientY-rect.top;
+        const cardId=card.dataset.id?parseInt(card.dataset.id):null;
+        if(cardId&&relY>third&&relY<third*2){
+          handleStackHover(card,cardId);
+        }else{
+          clearStackHover(); stackDropTarget=null;
+          if(relY<=rect.height/2){const prev=card.previousElementSibling;if(prev&&prev.classList.contains("drop-indicator"))prev.classList.add("visible");}
+          else{const next=card.nextElementSibling;if(next&&next.classList.contains("drop-indicator"))next.classList.add("visible");}
+        }
+        matched=true; break;
+      }
+      if(!matched){clearStackHover(); stackDropTarget=null; const last=body.querySelector(".drop-indicator:last-child");if(last)last.classList.add("visible");}
       return;
     }
     const allCards=[...body.querySelectorAll(".card:not(.dragging)")];
@@ -978,6 +1020,12 @@ function setupColDrop(body,colId){
     // Safari's spurious pre-drop dragleave cannot break pile creation.
     if(wasStackDrop!==null&&draggedId!==null&&wasStackDrop!==draggedId&&!selectMode){
       const droppedId=draggedId; resetDragState(); await stackTwoTasks(wasStackDrop,droppedId); return;
+    }
+
+    // Merge dragged stack onto a card or another stack
+    if(wasStackDrop!==null&&draggedStackId!==null){
+      const sid=draggedStackId; resetDragState();
+      await mergeStackOntoCard(wasStackDrop,sid); return;
     }
 
     // Move whole stack

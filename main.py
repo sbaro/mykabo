@@ -100,6 +100,7 @@ def require_auth(session: Optional[str] = Cookie(default=None)) -> str:
 _TASK_WRITABLE = frozenset({
     "title","description","column","color","category",
     "priority","due_date","position","stack_id","stack_pos","recurrence",
+    "snooze_until",
 })
 _STACK_MOVE_WRITABLE = frozenset({"column","position"})
 
@@ -144,11 +145,12 @@ def init_db():
     # Migrations
     existing = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
     for col, defn in [
-        ("archived",    "INTEGER DEFAULT 0"),
-        ("archived_at", "TEXT DEFAULT NULL"),
-        ("stack_id",    "TEXT DEFAULT NULL"),
-        ("stack_pos",   "INTEGER DEFAULT 0"),
-        ("recurrence",  "TEXT DEFAULT NULL"),
+        ("archived",     "INTEGER DEFAULT 0"),
+        ("archived_at",  "TEXT DEFAULT NULL"),
+        ("stack_id",     "TEXT DEFAULT NULL"),
+        ("stack_pos",    "INTEGER DEFAULT 0"),
+        ("recurrence",   "TEXT DEFAULT NULL"),
+        ("snooze_until", "TEXT DEFAULT NULL"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")
@@ -210,27 +212,29 @@ class LoginRequest(BaseModel):
     remember: bool = False
 
 class TaskCreate(BaseModel):
-    title:       str
-    description: Optional[str] = ""
-    column:      Optional[str] = "backlog"
-    color:       Optional[str] = "#fef08a"
-    category:    Optional[str] = ""
-    priority:    Optional[str] = "normal"
-    due_date:    Optional[str] = None
-    recurrence:  Optional[str] = None
+    title:        str
+    description:  Optional[str] = ""
+    column:       Optional[str] = "backlog"
+    color:        Optional[str] = "#fef08a"
+    category:     Optional[str] = ""
+    priority:     Optional[str] = "normal"
+    due_date:     Optional[str] = None
+    recurrence:   Optional[str] = None
+    snooze_until: Optional[str] = None
 
 class TaskUpdate(BaseModel):
-    title:       Optional[str] = None
-    description: Optional[str] = None
-    column:      Optional[str] = None
-    color:       Optional[str] = None
-    category:    Optional[str] = None
-    priority:    Optional[str] = None
-    due_date:    Optional[str] = None
-    position:    Optional[int] = None
-    stack_id:    Optional[str] = None
-    stack_pos:   Optional[int] = None
-    recurrence:  Optional[str] = None
+    title:        Optional[str] = None
+    description:  Optional[str] = None
+    column:       Optional[str] = None
+    color:        Optional[str] = None
+    category:     Optional[str] = None
+    priority:     Optional[str] = None
+    due_date:     Optional[str] = None
+    position:     Optional[int] = None
+    stack_id:     Optional[str] = None
+    stack_pos:    Optional[int] = None
+    recurrence:   Optional[str] = None
+    snooze_until: Optional[str] = None
 
 class CommentCreate(BaseModel):
     content: str
@@ -397,10 +401,11 @@ def create_task(task: TaskCreate, session: str = Depends(require_auth)):
     recurrence = task.recurrence if task.recurrence in RECURRENCES else None
     c = conn.cursor()
     c.execute(
-        "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position,recurrence)"
-        " VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position,recurrence,snooze_until)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
         (task.title, task.description, task.column, task.color,
-         category, task.priority, task.due_date, mp + 1, recurrence)
+         category, task.priority, task.due_date, mp + 1, recurrence,
+         task.snooze_until or None)
     )
     tid = c.lastrowid
     conn.commit()
@@ -434,6 +439,8 @@ def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require
         fields["category"] = _validate_category(conn, fields["category"])
     if "recurrence" in fields and fields["recurrence"] not in RECURRENCES:
         fields.pop("recurrence")
+    if "snooze_until" in fields and not fields["snooze_until"]:
+        fields["snooze_until"] = None
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         conn.execute(f"UPDATE tasks SET {sets} WHERE id=?", (*fields.values(), task_id))

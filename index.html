@@ -269,6 +269,7 @@
     <button class="hdr-btn" id="select-mode-btn" style="display:none" onclick="toggleSelectMode()">☑️ Sélection</button>
     <button class="hdr-btn" id="categories-btn"  style="display:none" onclick="openCategoriesPanel()">🏷️ Catégories</button>
     <button class="hdr-btn" id="archive-btn"     style="display:none" onclick="openArchive()">🗄️ Archives</button>
+    <button class="hdr-btn" id="snooze-btn"      style="display:none" onclick="toggleShowSnoozed()">💤 <span id="snooze-label"></span></button>
     <button class="hdr-btn" id="account-btn"     style="display:none" onclick="openAccountModal()">👤 Compte</button>
     <button class="hdr-btn" id="logout-btn"       style="display:none" onclick="logout()">⏻ Déconnexion</button>
   </div>
@@ -399,6 +400,7 @@
         <option value="yearly">Annuelle</option>
       </select>
     </div>
+    <div class="form-group" id="snooze-field"><label>💤 Masquer jusqu'au</label><input id="f-snooze" type="date"/><p class="hint">La tâche sera cachée dans le Backlog jusqu'à cette date.</p></div>
     <div class="form-group"><label>Couleur du post-it</label><div class="color-row" id="color-row"></div></div>
     <div class="btn-row">
       <button class="btn btn-ghost"   onclick="closeModal()">Annuler</button>
@@ -480,6 +482,7 @@
 const COLORS=["#fef08a","#bbf7d0","#bfdbfe","#fecaca","#e9d5ff","#fed7aa","#f0fdf4","#fff","#fce7f3","#cffafe"];
 const COLS=[{id:"backlog",label:"Backlog"},{id:"todo",label:"To Do"},{id:"inprogress",label:"In Progress"},{id:"blocked",label:"Blocked"},{id:"done",label:"Done"},{id:"abandoned",label:"Discarded"}];
 const ARCHIVABLE=["done","abandoned"];
+const PROMOTE_MAP={backlog:"todo",todo:"inprogress",inprogress:"done",blocked:"inprogress"};
 
 let currentTaskId=null, selectedColor=COLORS[0], tasks={};
 let wipLimits={}, wipEditingCol=null;
@@ -489,6 +492,7 @@ let selectMode=false, selectedIds=new Set(), bulkField=null;
 let browsingStackId=null;
 let stackHoverTarget=null;
 let stackDropTarget=null;   // mirrors stackHoverTarget but is NEVER cleared by dragleave
+let showSnoozed=false;
 
 // ── FILTER STATE ──────────────────────────────────────────────────────────────────
 let activeFilters = { priority: new Set(), category: new Set() };
@@ -550,7 +554,7 @@ const api={
 function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
   document.getElementById("filter-bar").classList.add("hidden");
-  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn"].forEach(id=>document.getElementById(id).style.display="none");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","snooze-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
@@ -810,6 +814,41 @@ async function loadBoard(){
   }
 }
 
+function refreshSnoozeBtn(){
+  const today=new Date().toISOString().slice(0,10);
+  const count=(tasks.backlog||[]).filter(t=>t.snooze_until&&t.snooze_until>today).length;
+  const btn=document.getElementById("snooze-btn");
+  if(!btn)return;
+  btn.style.display=(count>0||showSnoozed)?"inline-flex":"none";
+  btn.classList.toggle("active",showSnoozed);
+  const lbl=document.getElementById("snooze-label");
+  if(lbl)lbl.textContent=showSnoozed?`Masquer (${count})`:`${count} masquée${count>1?"s":""}`;
+}
+function toggleShowSnoozed(){showSnoozed=!showSnoozed;renderBoard();}
+
+async function promoteTask(e,id,fromCol){
+  e.stopPropagation();
+  const nextCol=PROMOTE_MAP[fromCol]; if(!nextCol)return;
+  try{
+    await api.patch(`/api/tasks/${id}`,{column:nextCol});
+    if(fromCol==="blocked")await handleUnblock(id,nextCol).catch(()=>{});
+    await loadBoard();
+  }catch(err){if(err.message!=="unauth")toast("Erreur lors de la promotion.",true);}
+}
+async function promoteStack(e,stackId,fromCol){
+  e.stopPropagation();
+  const nextCol=PROMOTE_MAP[fromCol]; if(!nextCol)return;
+  try{
+    const result=await api.patch(`/api/stacks/${stackId}/move`,{column:nextCol,position:0});
+    if(result.prev_cols&&result.new_col&&result.new_col!=="blocked"){
+      await Promise.all(Object.entries(result.prev_cols).map(async([tid,pc])=>{
+        if(pc==="blocked")await handleUnblock(parseInt(tid),result.new_col).catch(()=>{});
+      }));
+    }
+    await loadBoard();
+  }catch(err){if(err.message!=="unauth")toast("Erreur lors de la promotion.",true);}
+}
+
 function getStackRepresentatives(colTasks){
   const seen=new Set(), result=[];
   for(const t of colTasks){
@@ -828,7 +867,10 @@ function renderBoard(){
   COLS.forEach(col=>{
     const allItems=tasks[col.id]||[];
     const reps=getStackRepresentatives(allItems);
-    const visibleReps=(filterActive&&!dimMode)?reps.filter(t=>taskOrStackMatches(t)):reps;
+    const _today=new Date().toISOString().slice(0,10);
+    const notSnoozed=t=>showSnoozed||col.id!=="backlog"||!t.snooze_until||t.snooze_until<=_today;
+    const activeReps=reps.filter(notSnoozed);
+    const visibleReps=(filterActive&&!dimMode)?activeReps.filter(t=>taskOrStackMatches(t)):activeReps;
     const el=document.createElement("div"); el.className=`column col-${col.id}`;
     const matchCount=reps.filter(t=>taskOrStackMatches(t)).length;
     const limit=wipLimits[col.id];
@@ -875,6 +917,7 @@ function renderBoard(){
     setupColDrop(body,col.id);
   });
   refreshFilterBar();
+  refreshSnoozeBtn();
 }
 
 // ── FILTERING ─────────────────────────────────────────────────────────────────
@@ -1108,12 +1151,16 @@ function makeCard(t,colId){
   const overdue=due&&due<now&&t.column!=="done"&&t.column!=="abandoned";
   const dueStr=due?due.toLocaleDateString("fr-FR",{day:"2-digit",month:"short",year:"numeric"}):"";
   const canArchive=ARCHIVABLE.includes(t.column||colId);
-  // block_reason now comes directly from the API — no N+1
   const reason=(t.column||colId)==="blocked"?(t.block_reason||""):"";
+  const _todayStr=new Date().toISOString().slice(0,10);
+  const isSnoozedNow=t.snooze_until&&t.snooze_until>_todayStr;
+  const promoteCol=PROMOTE_MAP[t.column||colId];
+  const promoteLabel=promoteCol?(COLS.find(c=>c.id===promoteCol)?.label||promoteCol):null;
   card.innerHTML=`
     <div class="card-check">${selectedIds.has(t.id)?"✓":""}</div>
     <div class="card-top"><div class="card-title">${esc(t.title)}</div>
       <div class="card-actions">
+        ${promoteLabel?`<button title="→ ${promoteLabel}" onclick="promoteTask(event,${t.id},'${t.column||colId}')">→</button>`:""}
         ${canArchive?`<button title="Archiver" onclick="quickArchive(event,${t.id})">🗄️</button>`:""}
         <button title="Modifier" onclick="openEdit(${t.id})">✏️</button>
       </div>
@@ -1121,6 +1168,7 @@ function makeCard(t,colId){
     <div class="card-meta">
       <span class="tag priority-${t.priority}">${{low:"Basse",normal:"Normale",high:"Haute"}[t.priority]}</span>
       ${t.category?`<span class="tag">${esc(t.category)}</span>`:""}
+      ${isSnoozedNow?`<span class="tag" title="Masquée jusqu'au ${new Date(t.snooze_until+'T00:00:00').toLocaleDateString('fr-FR')}">💤</span>`:""}
       ${t.recurrence?`<span class="tag recurrence-tag" title="Récurrence : ${{daily:"quotidienne",weekly:"hebdomadaire",monthly:"mensuelle",yearly:"annuelle"}[t.recurrence]||t.recurrence}">♻️</span>`:""}
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
@@ -1147,10 +1195,13 @@ function makeStackCard(t,colId){
   const dueStr=due?due.toLocaleDateString("fr-FR",{day:"2-digit",month:"short",year:"numeric"}):"";
   const reason=(t.column||colId)==="blocked"?(t.block_reason||""):"";
   const canArchive=ARCHIVABLE.includes(t.column||colId);
+  const promoteColS=PROMOTE_MAP[t.column||colId];
+  const promoteLabelS=promoteColS?(COLS.find(c=>c.id===promoteColS)?.label||promoteColS):null;
   card.innerHTML=`
     <div class="card-check">${selectedIds.has(t.id)?"✓":""}</div>
     <div class="card-top"><div class="card-title">${esc(t.title)}</div>
       <div class="card-actions">
+        ${promoteLabelS?`<button title="→ ${promoteLabelS}" onclick="promoteStack(event,'${stackId}','${t.column||colId}')">→</button>`:""}
         ${canArchive?`<button title="Archiver la pile" onclick="quickArchiveStack(event,'${stackId}')">🗄️</button>`:""}
         <button title="Modifier" onclick="openEdit(${t.id})">✏️</button>
       </div>
@@ -1372,6 +1423,7 @@ function openNew(){
   document.getElementById("f-priority").value="normal";
   populateCategorySelect(document.getElementById("f-category"),"");
   document.getElementById("f-due").value=""; document.getElementById("f-recurrence").value="";
+  document.getElementById("f-snooze").value=""; document.getElementById("snooze-field").style.display="block";
   document.getElementById("btn-delete").style.display="none";
   document.getElementById("btn-archive").style.display="none"; document.getElementById("comments-area").style.display="none";
   setColor(COLORS[0]); document.getElementById("overlay").classList.add("open");
@@ -1388,6 +1440,8 @@ async function openEdit(id){
     populateCategorySelect(document.getElementById("f-category"),t.category||"");
     document.getElementById("f-due").value=t.due_date||"";
     document.getElementById("f-recurrence").value=t.recurrence||"";
+    document.getElementById("f-snooze").value=t.snooze_until||"";
+    document.getElementById("snooze-field").style.display=t.column==="backlog"?"block":"none";
     document.getElementById("btn-delete").style.display="inline-flex";
     document.getElementById("btn-archive").style.display=ARCHIVABLE.includes(t.column)?"inline-flex":"none";
     setColor(t.color||COLORS[0]); document.getElementById("comments-area").style.display="block";
@@ -1418,7 +1472,7 @@ function closeModal(){document.getElementById("overlay").classList.remove("open"
 async function saveTask(){
   const title=document.getElementById("f-title").value.trim(); if(!title){document.getElementById("f-title").focus();return;}
   const newCol=document.getElementById("f-col").value;
-  const payload={title,description:document.getElementById("f-desc").value,column:newCol,priority:document.getElementById("f-priority").value,category:document.getElementById("f-category").value,due_date:document.getElementById("f-due").value||null,color:selectedColor,recurrence:document.getElementById("f-recurrence").value||null};
+  const payload={title,description:document.getElementById("f-desc").value,column:newCol,priority:document.getElementById("f-priority").value,category:document.getElementById("f-category").value,due_date:document.getElementById("f-due").value||null,color:selectedColor,recurrence:document.getElementById("f-recurrence").value||null,snooze_until:document.getElementById("f-snooze").value};
   try{
     if(currentTaskId){
       const prevCol=findTaskCol(currentTaskId); await api.patch(`/api/tasks/${currentTaskId}`,payload);

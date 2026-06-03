@@ -483,7 +483,7 @@ const COLORS=["#fef08a","#bbf7d0","#bfdbfe","#fecaca","#e9d5ff","#fed7aa","#f0fd
 const COLS=[{id:"backlog",label:"Backlog"},{id:"todo",label:"To Do"},{id:"inprogress",label:"In Progress"},{id:"blocked",label:"Blocked"},{id:"done",label:"Done"},{id:"abandoned",label:"Discarded"}];
 const ARCHIVABLE=["done","abandoned"];
 const PROMOTE_MAP={backlog:"todo",todo:"inprogress",inprogress:"done",blocked:"inprogress"};
-const PROMOTE_ICON={backlog:"▶️",todo:"⚡",inprogress:"✅",blocked:"🔓"};
+const PROMOTE_ICON={backlog:"▶️",todo:"⚡",inprogress:"✅",blocked:"⚡"};
 
 let currentTaskId=null, selectedColor=COLORS[0], tasks={};
 let wipLimits={}, wipEditingCol=null;

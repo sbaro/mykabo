@@ -483,6 +483,7 @@ const COLORS=["#fef08a","#bbf7d0","#bfdbfe","#fecaca","#e9d5ff","#fed7aa","#f0fd
 const COLS=[{id:"backlog",label:"Backlog"},{id:"todo",label:"To Do"},{id:"inprogress",label:"In Progress"},{id:"blocked",label:"Blocked"},{id:"done",label:"Done"},{id:"abandoned",label:"Discarded"}];
 const ARCHIVABLE=["done","abandoned"];
 const PROMOTE_MAP={backlog:"todo",todo:"inprogress",inprogress:"done",blocked:"inprogress"};
+const PROMOTE_ICON={backlog:"▶️",todo:"⚡",inprogress:"✅",blocked:"🔓"};
 
 let currentTaskId=null, selectedColor=COLORS[0], tasks={};
 let wipLimits={}, wipEditingCol=null;
@@ -1160,7 +1161,7 @@ function makeCard(t,colId){
     <div class="card-check">${selectedIds.has(t.id)?"✓":""}</div>
     <div class="card-top"><div class="card-title">${esc(t.title)}</div>
       <div class="card-actions">
-        ${promoteLabel?`<button title="→ ${promoteLabel}" onclick="promoteTask(event,${t.id},'${t.column||colId}')">→</button>`:""}
+        ${promoteLabel?`<button title="→ ${promoteLabel}" onclick="promoteTask(event,${t.id},'${t.column||colId}')">${PROMOTE_ICON[t.column||colId]||"→"}</button>`:""}
         ${canArchive?`<button title="Archiver" onclick="quickArchive(event,${t.id})">🗄️</button>`:""}
         <button title="Modifier" onclick="openEdit(${t.id})">✏️</button>
       </div>
@@ -1201,7 +1202,7 @@ function makeStackCard(t,colId){
     <div class="card-check">${selectedIds.has(t.id)?"✓":""}</div>
     <div class="card-top"><div class="card-title">${esc(t.title)}</div>
       <div class="card-actions">
-        ${promoteLabelS?`<button title="→ ${promoteLabelS}" onclick="promoteStack(event,'${stackId}','${t.column||colId}')">→</button>`:""}
+        ${promoteLabelS?`<button title="→ ${promoteLabelS}" onclick="promoteStack(event,'${stackId}','${t.column||colId}')">${PROMOTE_ICON[t.column||colId]||"→"}</button>`:""}
         ${canArchive?`<button title="Archiver la pile" onclick="quickArchiveStack(event,'${stackId}')">🗄️</button>`:""}
         <button title="Modifier" onclick="openEdit(${t.id})">✏️</button>
       </div>

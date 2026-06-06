@@ -42,6 +42,29 @@ docker compose down
 
 Data is stored in `./kanban_data/` and persists across restarts.
 
+## Reset credentials from the command line
+
+If you need to reset the login or password without access to the web interface, run the following command directly in the container:
+
+```bash
+# Change both username and password
+docker compose exec kanban python main.py reset-credentials -u <new_login> -p <new_password>
+
+# Change password only
+docker compose exec kanban python main.py reset-credentials -p <new_password>
+
+# Change username only
+docker compose exec kanban python main.py reset-credentials -u <new_login>
+```
+
+Changes are persisted in the database and take effect on the next server restart:
+
+```bash
+docker compose restart kanban
+```
+
+Constraints: username ≥ 3 characters, password ≥ 6 characters.
+
 ## Configuration
 
 All settings are passed as environment variables. Edit `compose.yml` to override the defaults.

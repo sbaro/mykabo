@@ -785,3 +785,64 @@ def move_stack(stack_id: str, update: TaskUpdate,
 def index():
     with open("index.html", "r", encoding="utf-8") as f:
         return f.read()
+
+# ─── CLI ──────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import argparse, sys
+
+    parser = argparse.ArgumentParser(
+        prog="python main.py",
+        description="MyKaBo — outils d'administration en ligne de commande",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    rc = sub.add_parser(
+        "reset-credentials",
+        help="Réinitialiser le nom d'utilisateur et/ou le mot de passe",
+    )
+    rc.add_argument("-u", "--username", metavar="LOGIN",
+                    help="Nouveau nom d'utilisateur (min. 3 caractères)")
+    rc.add_argument("-p", "--password", metavar="PASS",
+                    help="Nouveau mot de passe (min. 6 caractères)")
+
+    args = parser.parse_args()
+
+    if args.command == "reset-credentials":
+        if not args.username and not args.password:
+            parser.error("Spécifiez au moins --username ou --password.")
+
+        conn = get_db()
+        errors = []
+
+        if args.username:
+            u = args.username.strip()
+            if len(u) < 3:
+                errors.append("Le nom d'utilisateur doit comporter au moins 3 caractères.")
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO config (key, value) VALUES ('username', ?)", (u,)
+                )
+                print(f"✓ Nom d'utilisateur mis à jour : {u}")
+
+        if args.password:
+            if len(args.password) < 6:
+                errors.append("Le mot de passe doit comporter au moins 6 caractères.")
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO config (key, value) VALUES ('pass_hash', ?)",
+                    (hash_pass(args.password),),
+                )
+                print("✓ Mot de passe mis à jour.")
+
+        if errors:
+            for e in errors:
+                print(f"Erreur : {e}", file=sys.stderr)
+            conn.close()
+            sys.exit(1)
+
+        conn.commit()
+        conn.close()
+        print("Les modifications seront prises en compte au prochain démarrage du serveur.")
+    else:
+        parser.print_help()
+        sys.exit(0)

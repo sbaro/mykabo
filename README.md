@@ -9,6 +9,7 @@ A self-hosted, single-user Kanban board for personal task management. Lightweigh
 - **Rich task metadata**: title, description, color, category, priority, due date
 - **Recurring tasks**: daily, weekly, monthly, yearly
 - **Task stacking**: group related cards into a single representative card
+- **Task dependencies**: mark a task as "blocked by" one or more others; cards show a lock until every prerequisite is Done (circular dependencies are rejected server-side)
 - **Block/unblock system**: mark tasks as blocked with a reason; status changes are automatically logged as comments
 - **Comments**: free-form notes plus automatic system notifications
 - **Archive**: completed or discarded tasks can be archived and restored

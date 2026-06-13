@@ -337,7 +337,7 @@
   <div class="filter-group search-group">
     <div class="search-input-wrap">
       <span class="search-icon">🔍</span>
-      <input class="search-input" id="search-input" type="search" placeholder="Rechercher…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSearch();this.blur();}"/>
+      <input class="search-input" id="search-input" type="text" placeholder="Rechercher…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSearch();this.blur();}"/>
       <button class="search-clear" id="search-clear-btn" onclick="clearSearch()" type="button" title="Effacer">✕</button>
     </div>
   </div>
@@ -1070,10 +1070,12 @@ function refreshFilterBar(){
   const badge=document.getElementById("filter-toggle-badge");
   badge.textContent=totalActive; badge.classList.toggle("empty",totalActive===0);
   // Auto-expand compact bar when any filter is active; collapse when all cleared
+  // (never collapse while the search input has focus — avoids collapsing on backspace)
   const bar=document.getElementById("filter-bar");
+  const searchFocused=document.activeElement===document.getElementById("search-input");
   if(bar.classList.contains("style-compact")){
     if(totalActive>0)bar.classList.add("expanded");
-    else bar.classList.remove("expanded");
+    else if(!searchFocused)bar.classList.remove("expanded");
   }
   // Match count
   const visible=all.filter(t=>matchesFilters(t)).length;
@@ -1707,6 +1709,8 @@ document.addEventListener("keydown",e=>{
     const tag=document.activeElement?.tagName;
     if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT")return;
     e.preventDefault();
+    const bar=document.getElementById("filter-bar");
+    if(bar&&bar.classList.contains("style-compact"))bar.classList.add("expanded");
     const inp=document.getElementById("search-input");
     if(inp){inp.focus();inp.select();}
   }

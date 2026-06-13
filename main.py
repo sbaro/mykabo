@@ -147,6 +147,13 @@ def init_db():
         position INTEGER DEFAULT 0,
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS task_dependencies (
+        task_id       INTEGER NOT NULL,
+        depends_on_id INTEGER NOT NULL,
+        PRIMARY KEY (task_id, depends_on_id),
+        FOREIGN KEY (task_id)       REFERENCES tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY (depends_on_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )""")
     # Unique constraint on (stack_id, stack_pos) — apply only if not exists
     c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS
         uq_stack_pos ON tasks(stack_id, stack_pos)
@@ -256,6 +263,9 @@ class ChecklistItemUpdate(BaseModel):
     checked:  Optional[int] = None
     position: Optional[int] = None
 
+class DependencyUpdate(BaseModel):
+    depends_on: list[int] = []
+
 class StackCreate(BaseModel):
     task_ids: list[int]
 
@@ -300,6 +310,26 @@ def _next_due(due_str: str | None, recurrence: str) -> str | None:
     return due_str
 
 def row_to_dict(r): return dict(r)
+
+# Detect a cycle in a directed graph expressed as {node: set(neighbours)}.
+# Edge a -> b means "task a is blocked by task b" (a depends on b).
+def _has_cycle(edges: dict[int, set[int]]) -> bool:
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[int, int] = {}
+    def visit(u: int) -> bool:
+        color[u] = GRAY
+        for v in edges.get(u, ()):
+            cv = color.get(v, WHITE)
+            if cv == GRAY:
+                return True
+            if cv == WHITE and visit(v):
+                return True
+        color[u] = BLACK
+        return False
+    for node in list(edges.keys()):
+        if color.get(node, WHITE) == WHITE and visit(node):
+            return True
+    return False
 
 # Returns the canonical category value. Empty/None clears it; otherwise it must
 # match an existing category name in the categories table (strict mode).
@@ -403,6 +433,17 @@ def get_tasks(session: str = Depends(require_auth)):
             all_ids,
         ).fetchall():
             checklist_counts[r["task_id"]] = {"total": r["total"], "done": r["done"] or 0}
+    # Batch dependency info ("blocked by" relationships)
+    deps_map: dict[int, list[int]] = {}
+    for r in conn.execute(
+        "SELECT task_id, depends_on_id FROM task_dependencies"
+    ).fetchall():
+        deps_map.setdefault(r["task_id"], []).append(r["depends_on_id"])
+    # A prerequisite is considered satisfied once it reaches the 'done' column.
+    status_map = {
+        r["id"]: r["column"]
+        for r in conn.execute("SELECT id, column FROM tasks").fetchall()
+    }
     result = {col: [] for col in COLUMNS}
     for t in rows:
         d = row_to_dict(t)
@@ -410,6 +451,12 @@ def get_tasks(session: str = Depends(require_auth)):
             d["block_reason"] = block_reasons[d["id"]]
         if d["id"] in checklist_counts:
             d["checklist_count"] = checklist_counts[d["id"]]
+        if d["id"] in deps_map:
+            dep_ids = deps_map[d["id"]]
+            open_count = sum(
+                1 for pid in dep_ids if status_map.get(pid) != "done"
+            )
+            d["deps"] = {"total": len(dep_ids), "open": open_count}
         col = d["column"]
         if col in result:
             result[col].append(d)
@@ -460,6 +507,11 @@ def get_task(task_id: int, session: str = Depends(require_auth)):
     ).fetchall()]
     d["checklist"] = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM checklist_items WHERE task_id=? ORDER BY position, id", (task_id,)
+    ).fetchall()]
+    d["depends_on"] = [row_to_dict(r) for r in conn.execute(
+        "SELECT t.id, t.title, t.column FROM task_dependencies dp "
+        "JOIN tasks t ON t.id = dp.depends_on_id "
+        "WHERE dp.task_id=? ORDER BY t.title", (task_id,)
     ).fetchall()]
     conn.close()
     return d
@@ -742,6 +794,48 @@ def delete_checklist_item(task_id: int, item_id: int,
     conn.commit()
     conn.close()
 
+# ─── DEPENDENCIES ─────────────────────────────────────────────────────────────
+@app.put("/api/tasks/{task_id}/dependencies")
+def set_dependencies(task_id: int, body: DependencyUpdate,
+                     session: str = Depends(require_auth)):
+    conn = get_db()
+    if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
+        conn.close()
+        raise HTTPException(404, "Task not found")
+    # Sanitise: drop self-references and duplicates, validate existence
+    deps: list[int] = []
+    seen: set[int] = set()
+    for dep in body.depends_on:
+        if dep == task_id or dep in seen:
+            continue
+        if not conn.execute(
+            "SELECT id FROM tasks WHERE id=? AND archived=0", (dep,)
+        ).fetchone():
+            conn.close()
+            raise HTTPException(400, f"Tâche {dep} introuvable")
+        seen.add(dep)
+        deps.append(dep)
+    # Build the proposed graph (all edges except this task's, plus the new ones)
+    edges: dict[int, set[int]] = {}
+    for r in conn.execute(
+        "SELECT task_id, depends_on_id FROM task_dependencies WHERE task_id!=?",
+        (task_id,),
+    ).fetchall():
+        edges.setdefault(r["task_id"], set()).add(r["depends_on_id"])
+    edges[task_id] = set(deps)
+    if _has_cycle(edges):
+        conn.close()
+        raise HTTPException(400, "Dépendance circulaire détectée")
+    conn.execute("DELETE FROM task_dependencies WHERE task_id=?", (task_id,))
+    for dep in deps:
+        conn.execute(
+            "INSERT INTO task_dependencies (task_id, depends_on_id) VALUES (?,?)",
+            (task_id, dep),
+        )
+    conn.commit()
+    conn.close()
+    return {"ok": True, "depends_on": deps}
+
 # ─── STACKS ───────────────────────────────────────────────────────────────────
 @app.post("/api/stacks", status_code=201)
 def create_stack(body: StackCreate, session: str = Depends(require_auth)):
@@ -880,6 +974,9 @@ def export_data(session: str = Depends(require_auth)):
             "SELECT content, created_at FROM comments WHERE task_id=? ORDER BY created_at",
             (d["id"],)
         ).fetchall()]
+        d["depends_on"] = [r["depends_on_id"] for r in conn.execute(
+            "SELECT depends_on_id FROM task_dependencies WHERE task_id=?", (d["id"],)
+        ).fetchall()]
         task_list.append(d)
     conn.close()
     payload = {
@@ -906,6 +1003,7 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
     conn = get_db()
     try:
         if body.mode == "replace":
+            conn.execute("DELETE FROM task_dependencies")
             conn.execute("DELETE FROM comments")
             conn.execute("DELETE FROM tasks")
             conn.execute("DELETE FROM categories")
@@ -930,6 +1028,7 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
                 )
         # Tasks — remap IDs and stack_ids to avoid collisions
         stack_id_map: dict[str, str] = {}
+        id_map: dict[int, int] = {}   # old task id -> new task id
         imported = 0
         for t in data.get("tasks", []):
             old_sid = t.get("stack_id")
@@ -963,6 +1062,9 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
                 ),
             )
             new_id = c.lastrowid
+            old_id = t.get("id")
+            if old_id is not None:
+                id_map[old_id] = new_id
             for comment in t.get("comments", []):
                 conn.execute(
                     "INSERT INTO comments (task_id, content, created_at) VALUES (?,?,?)",
@@ -970,6 +1072,19 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
                      comment.get("created_at", datetime.now(timezone.utc).isoformat())),
                 )
             imported += 1
+        # Dependencies — remap old ids; skip any that didn't survive the import
+        for t in data.get("tasks", []):
+            src = id_map.get(t.get("id"))
+            if src is None:
+                continue
+            for old_dep in t.get("depends_on", []) or []:
+                tgt = id_map.get(old_dep)
+                if tgt is None or tgt == src:
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_id) "
+                    "VALUES (?,?)", (src, tgt),
+                )
         conn.commit()
         conn.close()
         return {"ok": True, "tasks_imported": imported}

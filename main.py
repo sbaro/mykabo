@@ -138,6 +138,14 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS checklist_items (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id  INTEGER NOT NULL,
+        text     TEXT NOT NULL,
+        checked  INTEGER DEFAULT 0,
+        position INTEGER DEFAULT 0,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )""")
     # Unique constraint on (stack_id, stack_pos) — apply only if not exists
     c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS
         uq_stack_pos ON tasks(stack_id, stack_pos)
@@ -238,6 +246,14 @@ class TaskUpdate(BaseModel):
 
 class CommentCreate(BaseModel):
     content: str
+
+class ChecklistItemCreate(BaseModel):
+    text: str
+
+class ChecklistItemUpdate(BaseModel):
+    text:     Optional[str] = None
+    checked:  Optional[int] = None
+    position: Optional[int] = None
 
 class StackCreate(BaseModel):
     task_ids: list[int]
@@ -371,11 +387,24 @@ def get_tasks(session: str = Depends(require_auth)):
         if last:
             m = re.search(r"Cause : (.+)$", last["content"])
             block_reasons[tid] = m.group(1) if m else last["content"]
+    # Batch checklist progress counts
+    all_ids = [r["id"] for r in rows]
+    checklist_counts: dict[int, dict] = {}
+    if all_ids:
+        ph = ",".join("?" * len(all_ids))
+        for r in conn.execute(
+            f"SELECT task_id, COUNT(*) AS total, SUM(checked) AS done "
+            f"FROM checklist_items WHERE task_id IN ({ph}) GROUP BY task_id",
+            all_ids,
+        ).fetchall():
+            checklist_counts[r["task_id"]] = {"total": r["total"], "done": r["done"] or 0}
     result = {col: [] for col in COLUMNS}
     for t in rows:
         d = row_to_dict(t)
         if d["column"] == "blocked" and d["id"] in block_reasons:
             d["block_reason"] = block_reasons[d["id"]]
+        if d["id"] in checklist_counts:
+            d["checklist_count"] = checklist_counts[d["id"]]
         col = d["column"]
         if col in result:
             result[col].append(d)
@@ -423,6 +452,9 @@ def get_task(task_id: int, session: str = Depends(require_auth)):
     d = row_to_dict(row)
     d["comments"] = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM comments WHERE task_id=? ORDER BY created_at", (task_id,)
+    ).fetchall()]
+    d["checklist"] = [row_to_dict(r) for r in conn.execute(
+        "SELECT * FROM checklist_items WHERE task_id=? ORDER BY position, id", (task_id,)
     ).fetchall()]
     conn.close()
     return d
@@ -653,6 +685,55 @@ def delete_comment(task_id: int, comment_id: int,
     conn = get_db()
     conn.execute("DELETE FROM comments WHERE id=? AND task_id=?",
                  (comment_id, task_id))
+    conn.commit()
+    conn.close()
+
+# ─── CHECKLIST ────────────────────────────────────────────────────────────────
+@app.post("/api/tasks/{task_id}/checklist", status_code=201)
+def add_checklist_item(task_id: int, body: ChecklistItemCreate,
+                       session: str = Depends(require_auth)):
+    conn = get_db()
+    if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
+        conn.close()
+        raise HTTPException(404, "Task not found")
+    max_pos = conn.execute(
+        "SELECT COALESCE(MAX(position),0) FROM checklist_items WHERE task_id=?", (task_id,)
+    ).fetchone()[0]
+    c = conn.cursor()
+    c.execute("INSERT INTO checklist_items (task_id, text, position) VALUES (?,?,?)",
+              (task_id, body.text.strip(), max_pos + 1))
+    cid = c.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM checklist_items WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    return row_to_dict(row)
+
+@app.patch("/api/tasks/{task_id}/checklist/{item_id}")
+def update_checklist_item(task_id: int, item_id: int, body: ChecklistItemUpdate,
+                          session: str = Depends(require_auth)):
+    conn = get_db()
+    if not conn.execute(
+        "SELECT id FROM checklist_items WHERE id=? AND task_id=?", (item_id, task_id)
+    ).fetchone():
+        conn.close()
+        raise HTTPException(404, "Checklist item not found")
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "text" in fields:
+        fields["text"] = fields["text"].strip() or fields.pop("text")
+    if fields:
+        sets = ", ".join(f"{k}=?" for k in fields)
+        conn.execute(f"UPDATE checklist_items SET {sets} WHERE id=?",
+                     (*fields.values(), item_id))
+        conn.commit()
+    row = conn.execute("SELECT * FROM checklist_items WHERE id=?", (item_id,)).fetchone()
+    conn.close()
+    return row_to_dict(row)
+
+@app.delete("/api/tasks/{task_id}/checklist/{item_id}", status_code=204)
+def delete_checklist_item(task_id: int, item_id: int,
+                          session: str = Depends(require_auth)):
+    conn = get_db()
+    conn.execute("DELETE FROM checklist_items WHERE id=? AND task_id=?", (item_id, task_id))
     conn.commit()
     conn.close()
 

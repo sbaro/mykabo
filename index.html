@@ -165,6 +165,19 @@
   .comment-add input{flex:1;padding:7px 10px;border:1.5px solid #e4e4e7;border-radius:7px;font-size:.82rem;outline:none;}
   .comment-add input:focus{border-color:var(--accent);}
   .comment-add button{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:7px 12px;cursor:pointer;font-size:.82rem;}
+  /* Checklist */
+  .checklist-section h3{font-size:.88rem;font-weight:700;margin-bottom:10px;color:var(--muted);}
+  .checklist-item{display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid #f4f4f5;}
+  .checklist-item input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;flex-shrink:0;}
+  .checklist-item-text{flex:1;font-size:.85rem;line-height:1.3;}
+  .checklist-item-text.checked{text-decoration:line-through;color:var(--muted);}
+  .del-ci{background:none;border:none;cursor:pointer;color:var(--muted);font-size:.8rem;opacity:0;transition:opacity .15s;padding:2px 4px;}
+  .checklist-item:hover .del-ci{opacity:1;}
+  .checklist-add{display:flex;gap:6px;margin-top:8px;}
+  .checklist-add input{flex:1;padding:7px 10px;border:1.5px solid #e4e4e7;border-radius:7px;font-size:.82rem;outline:none;font-family:var(--font);}
+  .checklist-add input:focus{border-color:var(--accent);}
+  .checklist-add button{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:7px 14px;cursor:pointer;font-size:.88rem;font-weight:700;}
+  .checklist-progress{background:#e0e7ff!important;color:#3730a3!important;font-variant-numeric:tabular-nums;}
   .block-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center;padding:16px;}
   .block-overlay.open{display:flex;}
   .block-modal{background:#fff;border-radius:14px;width:100%;max-width:400px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25);}
@@ -407,6 +420,17 @@
       <button class="btn btn-danger"  id="btn-delete"  style="display:none" onclick="deleteCurrentTask()">Supprimer</button>
       <button class="btn btn-archive" id="btn-archive" style="display:none" onclick="archiveCurrentTask()">🗄️ Archiver</button>
       <button class="btn btn-primary" onclick="saveTask()">Enregistrer</button>
+    </div>
+    <div id="checklist-area" style="display:none">
+      <hr class="separator"/>
+      <div class="checklist-section">
+        <h3>☑️ Checklist <span id="checklist-progress" style="font-weight:400;font-size:.8rem;color:var(--muted)"></span></h3>
+        <div id="checklist-list"></div>
+        <div class="checklist-add">
+          <input id="new-checklist-item" placeholder="Ajouter un élément…" onkeydown="if(event.key==='Enter')addChecklistItem()"/>
+          <button onclick="addChecklistItem()">+</button>
+        </div>
+      </div>
     </div>
     <div id="comments-area" style="display:none">
       <hr class="separator"/>
@@ -1171,6 +1195,7 @@ function makeCard(t,colId){
       ${t.category?`<span class="tag">${esc(t.category)}</span>`:""}
       ${isSnoozedNow?`<span class="tag" title="Masquée jusqu'au ${new Date(t.snooze_until+'T00:00:00').toLocaleDateString('fr-FR')}">💤</span>`:""}
       ${t.recurrence?`<span class="tag recurrence-tag" title="Récurrence : ${{daily:"quotidienne",weekly:"hebdomadaire",monthly:"mensuelle",yearly:"annuelle"}[t.recurrence]||t.recurrence}">♻️</span>`:""}
+      ${t.checklist_count?.total>0?`<span class="tag checklist-progress" title="Checklist">${t.checklist_count.done}/${t.checklist_count.total} ✓</span>`:""}
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
     ${t.description?`<div style="font-size:.78rem;color:#52525b;margin-top:5px">${esc(t.description).substring(0,80)}${t.description.length>80?"…":""}</div>`:""}
@@ -1211,6 +1236,7 @@ function makeStackCard(t,colId){
       <span class="tag priority-${t.priority}">${{low:"Basse",normal:"Normale",high:"Haute"}[t.priority]}</span>
       ${t.category?`<span class="tag">${esc(t.category)}</span>`:""}
       ${t.recurrence?`<span class="tag recurrence-tag" title="Récurrence : ${{daily:"quotidienne",weekly:"hebdomadaire",monthly:"mensuelle",yearly:"annuelle"}[t.recurrence]||t.recurrence}">♻️</span>`:""}
+      ${t.checklist_count?.total>0?`<span class="tag checklist-progress" title="Checklist">${t.checklist_count.done}/${t.checklist_count.total} ✓</span>`:""}
     </div>
     ${due?`<div class="due-date${overdue?" overdue":""}">📅 ${overdue?"⚠️ ":""}${dueStr}</div>`:""}
     ${reason?`<div class="blocked-sticker">🚧 <span>${esc(blockReasonShort(reason))}</span></div>`:""}
@@ -1426,7 +1452,9 @@ function openNew(){
   document.getElementById("f-due").value=""; document.getElementById("f-recurrence").value="";
   document.getElementById("f-snooze").value=""; document.getElementById("snooze-field").style.display="block";
   document.getElementById("btn-delete").style.display="none";
-  document.getElementById("btn-archive").style.display="none"; document.getElementById("comments-area").style.display="none";
+  document.getElementById("btn-archive").style.display="none";
+  document.getElementById("checklist-area").style.display="none";
+  document.getElementById("comments-area").style.display="none";
   setColor(COLORS[0]); document.getElementById("overlay").classList.add("open");
   setTimeout(()=>document.getElementById("f-title").focus(),50);
 }
@@ -1446,6 +1474,8 @@ async function openEdit(id){
     document.getElementById("btn-delete").style.display="inline-flex";
     document.getElementById("btn-archive").style.display=ARCHIVABLE.includes(t.column)?"inline-flex":"none";
     setColor(t.color||COLORS[0]); document.getElementById("comments-area").style.display="block";
+    document.getElementById("checklist-area").style.display="block";
+    renderChecklist(t.checklist||[]);
     renderComments(t.comments||[]); document.getElementById("overlay").classList.add("open");
   }catch(e){if(e.message!=="unauth")toast("Impossible de charger la tâche.",true);}
 }
@@ -1469,6 +1499,46 @@ async function delComment(tid,cid,btn){
   try{await api.del(`/api/tasks/${tid}/comments/${cid}`);btn.closest(".comment-item").remove();}
   catch(e){if(e.message!=="unauth")toast("Erreur lors de la suppression.",true);}
 }
+// ── CHECKLIST ─────────────────────────────────────────────────────────────────
+function renderChecklist(items){
+  const list=document.getElementById("checklist-list"); list.innerHTML="";
+  items.forEach(item=>{
+    const div=document.createElement("div"); div.className="checklist-item"; div.dataset.id=item.id;
+    div.innerHTML=`<input type="checkbox" ${item.checked?"checked":""}/>
+      <span class="checklist-item-text${item.checked?" checked":""}">${esc(item.text)}</span>
+      <button class="del-ci" title="Supprimer" onclick="deleteChecklistItem(${item.id})">✕</button>`;
+    div.querySelector("input").addEventListener("change",e=>toggleChecklistItem(item.id,e.target.checked));
+    list.appendChild(div);
+  });
+  const total=items.length, done=items.filter(i=>i.checked).length;
+  document.getElementById("checklist-progress").textContent=total>0?`${done}/${total}`:"";
+}
+async function addChecklistItem(){
+  const inp=document.getElementById("new-checklist-item"); const text=inp.value.trim();
+  if(!text||!currentTaskId)return;
+  try{
+    await api.post(`/api/tasks/${currentTaskId}/checklist`,{text});
+    inp.value=""; const t=await api.get(`/api/tasks/${currentTaskId}`);
+    renderChecklist(t.checklist||[]); await loadBoard();
+  }catch(e){if(e.message!=="unauth")toast("Erreur.",true);}
+}
+async function toggleChecklistItem(itemId,checked){
+  if(!currentTaskId)return;
+  try{
+    await api.patch(`/api/tasks/${currentTaskId}/checklist/${itemId}`,{checked:checked?1:0});
+    const t=await api.get(`/api/tasks/${currentTaskId}`);
+    renderChecklist(t.checklist||[]); await loadBoard();
+  }catch(e){if(e.message!=="unauth")toast("Erreur.",true);}
+}
+async function deleteChecklistItem(itemId){
+  if(!currentTaskId)return;
+  try{
+    await api.del(`/api/tasks/${currentTaskId}/checklist/${itemId}`);
+    const t=await api.get(`/api/tasks/${currentTaskId}`);
+    renderChecklist(t.checklist||[]); await loadBoard();
+  }catch(e){if(e.message!=="unauth")toast("Erreur.",true);}
+}
+
 function closeModal(){document.getElementById("overlay").classList.remove("open");currentTaskId=null;loadBoard();}
 async function saveTask(){
   const title=document.getElementById("f-title").value.trim(); if(!title){document.getElementById("f-title").focus();return;}

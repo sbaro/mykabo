@@ -439,7 +439,9 @@ def get_tasks(session: str = Depends(require_auth)):
         "SELECT task_id, depends_on_id FROM task_dependencies"
     ).fetchall():
         deps_map.setdefault(r["task_id"], []).append(r["depends_on_id"])
-    # A prerequisite is considered satisfied once it reaches the 'done' column.
+    # A prerequisite is considered satisfied once it reaches a terminal column
+    # ('done' = completed, 'abandoned' = discarded — either way it won't block).
+    _RESOLVED_COLS = {"done", "abandoned"}
     status_map = {
         r["id"]: r["column"]
         for r in conn.execute("SELECT id, column FROM tasks").fetchall()
@@ -454,7 +456,7 @@ def get_tasks(session: str = Depends(require_auth)):
         if d["id"] in deps_map:
             dep_ids = deps_map[d["id"]]
             open_count = sum(
-                1 for pid in dep_ids if status_map.get(pid) != "done"
+                1 for pid in dep_ids if status_map.get(pid) not in _RESOLVED_COLS
             )
             d["deps"] = {"total": len(dep_ids), "open": open_count}
         col = d["column"]

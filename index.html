@@ -1649,7 +1649,7 @@ function renderDepEditor(){
   const empty=document.getElementById("dep-empty");
   wrap.innerHTML="";
   editDeps.forEach(d=>{
-    const done=d.column==="done";
+    const done=d.column==="done"||d.column==="abandoned";
     const chip=document.createElement("span");
     chip.className="dep-chip"+(done?" done":"");
     chip.innerHTML=`${done?"✓ ":"⏳ "}<span title="${esc(d.title)}">#${d.id} ${esc(d.title)}</span>`;
@@ -1665,7 +1665,7 @@ function renderDepEditor(){
     .filter(t=>t.id!==currentTaskId&&!chosen.has(t.id))
     .sort((a,b)=>a.title.localeCompare(b.title));
   sel.innerHTML=`<option value="">+ Ajouter une tâche prérequise…</option>`+
-    all.map(t=>`<option value="${t.id}">#${t.id} · ${esc(t.title)}${t.column==="done"?" ✓":""}</option>`).join("");
+    all.map(t=>`<option value="${t.id}">#${t.id} · ${esc(t.title)}${(t.column==="done"||t.column==="abandoned")?" ✓":""}</option>`).join("");
 }
 function addDependency(idStr){
   const id=parseInt(idStr,10); if(!id)return;

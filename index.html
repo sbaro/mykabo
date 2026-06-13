@@ -222,6 +222,15 @@
   .filter-clear:hover{background:rgba(99,102,241,.08);}
   .filter-clear[disabled]{opacity:0;pointer-events:none;}
   .filter-empty-cat{font-size:.75rem;color:var(--muted);font-style:italic;}
+  .search-group{flex-shrink:0;}
+  .search-input-wrap{position:relative;display:inline-flex;align-items:center;}
+  .search-input{border:1.5px solid #e4e4e7;border-radius:99px;padding:5px 28px 5px 28px;font-size:.8rem;font-family:var(--font);color:var(--text);background:#f4f4f5;outline:none;width:200px;transition:border-color .15s,background .15s,box-shadow .15s;}
+  .search-input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(99,102,241,.12);}
+  .search-input::placeholder{color:var(--muted);}
+  .search-icon{position:absolute;left:9px;font-size:.78rem;pointer-events:none;opacity:.45;}
+  .search-clear{position:absolute;right:7px;background:none;border:none;cursor:pointer;font-size:.75rem;color:var(--muted);padding:0;display:none;line-height:1;opacity:.6;}
+  .search-clear:hover{opacity:1;}
+  .search-clear.visible{display:block;}
   /* Compact style: collapses to a single button until expanded */
   .filter-bar.style-compact:not(.expanded) .filter-group,
   .filter-bar.style-compact:not(.expanded) .filter-divider{display:none;}
@@ -325,6 +334,14 @@
     <span>🔍 Filtres</span>
     <span class="filter-badge empty" id="filter-toggle-badge">0</span>
   </button>
+  <div class="filter-group search-group">
+    <div class="search-input-wrap">
+      <span class="search-icon">🔍</span>
+      <input class="search-input" id="search-input" type="text" placeholder="Rechercher…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSearch();this.blur();}"/>
+      <button class="search-clear" id="search-clear-btn" onclick="clearSearch()" type="button" title="Effacer">✕</button>
+    </div>
+  </div>
+  <div class="filter-divider"></div>
   <div class="filter-group" id="filter-priority-group">
     <span class="filter-label">⚡ Priorité</span>
   </div>
@@ -543,6 +560,7 @@ let showSnoozed=false;
 
 // ── FILTER STATE ──────────────────────────────────────────────────────────────────
 let activeFilters = { priority: new Set(), category: new Set() };
+let searchQuery = "";
 const LOGIC_MODE = "and";   // "and" | "or" — logic between priority and category groups
 const FILTER_MODE = "dim";  // "hide" | "dim"  — non-matching cards are faded vs removed
 const PRIORITIES = [{id:"high",label:"Haute"},{id:"normal",label:"Normale"},{id:"low",label:"Basse"}];
@@ -909,7 +927,7 @@ function countStack(stackId){return Object.values(tasks).flat().filter(t=>t.stac
 function renderBoard(){
   const board=document.getElementById("board"); board.innerHTML="";
   if(selectMode)board.classList.add("select-mode");
-  const filterActive=activeFilters.priority.size+activeFilters.category.size>0;
+  const filterActive=activeFilters.priority.size+activeFilters.category.size>0||!!searchQuery;
   const dimMode=FILTER_MODE==="dim";
   COLS.forEach(col=>{
     const allItems=tasks[col.id]||[];
@@ -968,7 +986,13 @@ function renderBoard(){
 }
 
 // ── FILTERING ─────────────────────────────────────────────────────────────────
+function matchesSearch(t){
+  if(!searchQuery)return true;
+  const q=searchQuery.toLowerCase();
+  return (t.title&&t.title.toLowerCase().includes(q))||(t.description&&t.description.toLowerCase().includes(q));
+}
 function matchesFilters(t){
+  if(!matchesSearch(t))return false;
   const prioActive=activeFilters.priority.size>0;
   const catActive=activeFilters.category.size>0;
   if(!prioActive&&!catActive)return true;
@@ -976,6 +1000,18 @@ function matchesFilters(t){
   const catOk=!catActive||(t.category&&activeFilters.category.has(t.category));
   if(LOGIC_MODE==="and")return prioOk&&catOk;
   return (prioActive&&prioOk)||(catActive&&catOk);
+}
+function onSearchInput(v){
+  searchQuery=v.trim();
+  document.getElementById("search-clear-btn").classList.toggle("visible",searchQuery.length>0);
+  renderBoard();
+}
+function clearSearch(){
+  searchQuery="";
+  const inp=document.getElementById("search-input");
+  if(inp)inp.value="";
+  document.getElementById("search-clear-btn").classList.remove("visible");
+  renderBoard();
 }
 function taskOrStackMatches(t){
   if(!t.stack_id)return matchesFilters(t);
@@ -987,9 +1023,9 @@ function toggleFilter(group,value){
   renderBoard();
 }
 function clearAllFilters(){
-  if(activeFilters.priority.size===0&&activeFilters.category.size===0)return;
+  if(activeFilters.priority.size===0&&activeFilters.category.size===0&&!searchQuery)return;
   activeFilters.priority.clear(); activeFilters.category.clear();
-  renderBoard();
+  clearSearch();
 }
 function toggleFilterExpanded(){
   document.getElementById("filter-bar").classList.toggle("expanded");
@@ -1029,15 +1065,17 @@ function refreshFilterBar(){
     });
   }
   // Status
-  const totalActive=activeFilters.priority.size+activeFilters.category.size;
+  const totalActive=activeFilters.priority.size+activeFilters.category.size+(searchQuery?1:0);
   document.getElementById("filter-clear-btn").disabled=totalActive===0;
   const badge=document.getElementById("filter-toggle-badge");
   badge.textContent=totalActive; badge.classList.toggle("empty",totalActive===0);
-  // Auto-expand compact bar when filters are applied; collapse when cleared
+  // Auto-expand compact bar when any filter is active; collapse when all cleared
+  // (never collapse while the search input has focus — avoids collapsing on backspace)
   const bar=document.getElementById("filter-bar");
+  const searchFocused=document.activeElement===document.getElementById("search-input");
   if(bar.classList.contains("style-compact")){
     if(totalActive>0)bar.classList.add("expanded");
-    else bar.classList.remove("expanded");
+    else if(!searchFocused)bar.classList.remove("expanded");
   }
   // Match count
   const visible=all.filter(t=>matchesFilters(t)).length;
@@ -1664,6 +1702,19 @@ document.getElementById("import-overlay").addEventListener("click",e=>{if(e.targ
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function darken(hex){let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");if(c.length!==6)return"#aaa";const n=parseInt(c,16);return`rgb(${Math.max(0,((n>>16)&0xff)-40)},${Math.max(0,((n>>8)&0xff)-40)},${Math.max(0,(n&0xff)-40)})`;}
 function esc(s){return(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener("keydown",e=>{
+  if(e.key==="/"&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+    const tag=document.activeElement?.tagName;
+    if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT")return;
+    e.preventDefault();
+    const bar=document.getElementById("filter-bar");
+    if(bar&&bar.classList.contains("style-compact"))bar.classList.add("expanded");
+    const inp=document.getElementById("search-input");
+    if(inp){inp.focus();inp.select();}
+  }
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 api.get("/api/me").then(async u=>{currentUsername=u.username||"";hideLogin(); await loadCategories(); loadBoard();}).catch(()=>showLogin());

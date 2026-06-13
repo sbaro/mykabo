@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, Depends, Response, Cookie, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
+import json
 import sqlite3
 import os
 import secrets
@@ -256,6 +257,10 @@ class CategoryCreate(BaseModel):
 class CategoryUpdate(BaseModel):
     name:     Optional[str] = None
     position: Optional[int] = None
+
+class ImportRequest(BaseModel):
+    mode: str   # "merge" | "replace"
+    data: Any
 
 RECURRENCES = {"daily", "weekly", "monthly", "yearly"}
 
@@ -779,6 +784,120 @@ def move_stack(stack_id: str, update: TaskUpdate,
         ).fetchall()
         conn.close()
         return {"tasks": [row_to_dict(r) for r in rows]}
+
+# ─── EXPORT / IMPORT ─────────────────────────────────────────────────────────
+@app.get("/api/export")
+def export_data(session: str = Depends(require_auth)):
+    conn = get_db()
+    rows      = conn.execute("SELECT * FROM tasks ORDER BY id").fetchall()
+    cats      = conn.execute("SELECT * FROM categories ORDER BY position, name").fetchall()
+    wip_rows  = conn.execute("SELECT col_id, max_tasks FROM wip_limits").fetchall()
+    task_list = []
+    for t in rows:
+        d = row_to_dict(t)
+        d["comments"] = [row_to_dict(c) for c in conn.execute(
+            "SELECT content, created_at FROM comments WHERE task_id=? ORDER BY created_at",
+            (d["id"],)
+        ).fetchall()]
+        task_list.append(d)
+    conn.close()
+    payload = {
+        "schema_version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "categories": [row_to_dict(c) for c in cats],
+        "wip_limits": {r["col_id"]: r["max_tasks"] for r in wip_rows},
+        "tasks": task_list,
+    }
+    filename = f"mykabo-export-{date.today().isoformat()}.json"
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+@app.post("/api/import")
+def import_data(body: ImportRequest, session: str = Depends(require_auth)):
+    if body.mode not in ("merge", "replace"):
+        raise HTTPException(400, "Mode invalide : utilisez 'merge' ou 'replace'")
+    data = body.data
+    if not isinstance(data, dict) or data.get("schema_version") != 1:
+        raise HTTPException(400, "Fichier invalide ou version de schéma non supportée")
+    conn = get_db()
+    try:
+        if body.mode == "replace":
+            conn.execute("DELETE FROM comments")
+            conn.execute("DELETE FROM tasks")
+            conn.execute("DELETE FROM categories")
+            conn.execute("DELETE FROM wip_limits")
+        # Categories
+        for cat in data.get("categories", []):
+            name = (cat.get("name") or "").strip()
+            if not name:
+                continue
+            if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+                max_pos = conn.execute(
+                    "SELECT COALESCE(MAX(position),-1) FROM categories"
+                ).fetchone()[0]
+                conn.execute("INSERT INTO categories (name, position) VALUES (?,?)",
+                             (name, max_pos + 1))
+        # WIP limits
+        for col_id, max_tasks in data.get("wip_limits", {}).items():
+            if col_id in COLUMNS and isinstance(max_tasks, int) and max_tasks > 0:
+                conn.execute(
+                    "INSERT OR REPLACE INTO wip_limits (col_id, max_tasks) VALUES (?,?)",
+                    (col_id, max_tasks),
+                )
+        # Tasks — remap IDs and stack_ids to avoid collisions
+        stack_id_map: dict[str, str] = {}
+        imported = 0
+        for t in data.get("tasks", []):
+            old_sid = t.get("stack_id")
+            new_sid = None
+            if old_sid:
+                if old_sid not in stack_id_map:
+                    stack_id_map[old_sid] = secrets.token_urlsafe(8)
+                new_sid = stack_id_map[old_sid]
+            category = t.get("category") or ""
+            if category and not conn.execute(
+                "SELECT 1 FROM categories WHERE name=?", (category,)
+            ).fetchone():
+                category = ""
+            recurrence = t.get("recurrence")
+            if recurrence not in RECURRENCES:
+                recurrence = None
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO tasks (title,description,column,color,category,priority,"
+                "due_date,position,archived,archived_at,stack_id,stack_pos,"
+                "recurrence,snooze_until,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    t.get("title",""), t.get("description",""),
+                    t.get("column","backlog"), t.get("color","#fef08a"),
+                    category, t.get("priority","normal"),
+                    t.get("due_date"), t.get("position",0),
+                    int(bool(t.get("archived",0))), t.get("archived_at"),
+                    new_sid, t.get("stack_pos",0),
+                    recurrence, t.get("snooze_until"),
+                    t.get("created_at", datetime.now(timezone.utc).isoformat()),
+                ),
+            )
+            new_id = c.lastrowid
+            for comment in t.get("comments", []):
+                conn.execute(
+                    "INSERT INTO comments (task_id, content, created_at) VALUES (?,?,?)",
+                    (new_id, comment.get("content",""),
+                     comment.get("created_at", datetime.now(timezone.utc).isoformat())),
+                )
+            imported += 1
+        conn.commit()
+        conn.close()
+        return {"ok": True, "tasks_imported": imported}
+    except HTTPException:
+        conn.close()
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(500, f"Erreur lors de l'import : {e}")
 
 # ─── FRONTEND ─────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)

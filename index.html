@@ -270,6 +270,9 @@
     <button class="hdr-btn" id="categories-btn"  style="display:none" onclick="openCategoriesPanel()">🏷️ Catégories</button>
     <button class="hdr-btn" id="snooze-btn"      style="display:none" onclick="toggleShowSnoozed()">💤 <span id="snooze-label"></span></button>
     <button class="hdr-btn" id="archive-btn"     style="display:none" onclick="openArchive()">🗄️ Archives</button>
+    <button class="hdr-btn" id="export-btn"      style="display:none" onclick="exportData()">📤 Export</button>
+    <button class="hdr-btn" id="import-btn"      style="display:none" onclick="triggerImport()">📥 Import</button>
+    <input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImportFile(event)"/>
     <button class="hdr-btn" id="account-btn"     style="display:none" onclick="openAccountModal()">👤 Compte</button>
     <button class="hdr-btn" id="logout-btn"       style="display:none" onclick="logout()">⏻ Déconnexion</button>
   </div>
@@ -422,6 +425,25 @@
   </div>
 </div>
 
+<!-- Import modal -->
+<div class="overlay" id="import-overlay">
+  <div class="modal" style="max-width:440px">
+    <h2>📥 Importer des données</h2>
+    <p class="subtitle" id="import-subtitle"></p>
+    <div class="form-group">
+      <label>Mode d'import</label>
+      <select id="import-mode">
+        <option value="merge">Fusionner — ajouter sans supprimer les tâches existantes</option>
+        <option value="replace">Remplacer — effacer toutes les données actuelles</option>
+      </select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="closeImportModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="confirmImport()">Importer</button>
+    </div>
+  </div>
+</div>
+
 <!-- Block reason modal -->
 <div class="block-overlay" id="wip-overlay" onclick="if(event.target===this)closeWipModal()">
   <div class="block-modal" style="max-width:320px;text-align:center">
@@ -555,12 +577,12 @@ const api={
 function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
   document.getElementById("filter-bar").classList.add("hidden");
-  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","snooze-btn"].forEach(id=>document.getElementById(id).style.display="none");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","snooze-btn","export-btn","import-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
   document.getElementById("filter-bar").classList.remove("hidden");
-  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
+  ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","export-btn","import-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
 }
 async function doLogin(){
   const u=document.getElementById("l-user").value.trim(), p=document.getElementById("l-pass").value;
@@ -1529,6 +1551,37 @@ async function saveCredentials(){
   }catch(e){if(e.message!=="unauth")toast(e.message||"Erreur lors de la mise à jour.",true);}
 }
 
+// ── EXPORT / IMPORT ───────────────────────────────────────────────────────────
+function exportData(){window.location.href="/api/export";}
+function triggerImport(){document.getElementById("import-file").click();}
+let importFileData=null;
+function handleImportFile(e){
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=evt=>{
+    try{
+      importFileData=JSON.parse(evt.target.result);
+      const n=importFileData.tasks?.length??0;
+      document.getElementById("import-subtitle").textContent=`Fichier : ${file.name} — ${n} tâche(s) détectée(s).`;
+      document.getElementById("import-overlay").classList.add("open");
+    }catch{toast("Fichier JSON invalide.",true);}
+    e.target.value="";
+  };
+  reader.readAsText(file);
+}
+function closeImportModal(){document.getElementById("import-overlay").classList.remove("open");importFileData=null;}
+async function confirmImport(){
+  if(!importFileData)return;
+  const mode=document.getElementById("import-mode").value;
+  if(mode==="replace"&&!confirm("⚠️ Toutes les données actuelles seront effacées. Continuer ?"))return;
+  try{
+    const r=await api.post("/api/import",{mode,data:importFileData});
+    closeImportModal();
+    toast(`✓ ${r.tasks_imported} tâche(s) importée(s).`);
+    await loadCategories(); await loadBoard();
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors de l'import.",true);}
+}
+
 // ── Overlay close handlers ────────────────────────────────────────────────────
 document.getElementById("overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeModal();});
 document.getElementById("bulk-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeBulkModal();});
@@ -1536,6 +1589,7 @@ document.getElementById("archive-panel").addEventListener("click",e=>{if(e.targe
 document.getElementById("categories-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeCategoriesPanel();});
 document.getElementById("stack-panel").addEventListener("click",e=>{if(e.target===e.currentTarget)closeStackPanel();});
 document.getElementById("account-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeAccountModal();});
+document.getElementById("import-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeImportModal();});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function darken(hex){let c=hex.replace("#","");if(c.length===3)c=c.split("").map(x=>x+x).join("");if(c.length!==6)return"#aaa";const n=parseInt(c,16);return`rgb(${Math.max(0,((n>>16)&0xff)-40)},${Math.max(0,((n>>8)&0xff)-40)},${Math.max(0,(n&0xff)-40)})`;}

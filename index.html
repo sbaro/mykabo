@@ -222,8 +222,9 @@
   .filter-clear:hover{background:rgba(99,102,241,.08);}
   .filter-clear[disabled]{opacity:0;pointer-events:none;}
   .filter-empty-cat{font-size:.75rem;color:var(--muted);font-style:italic;}
+  .search-group{flex-shrink:0;}
   .search-input-wrap{position:relative;display:inline-flex;align-items:center;}
-  .search-input{border:1.5px solid #e4e4e7;border-radius:99px;padding:5px 30px 5px 30px;font-size:.8rem;font-family:var(--font);color:var(--text);background:#f4f4f5;outline:none;width:180px;transition:border-color .15s,background .15s,box-shadow .15s;}
+  .search-input{border:1.5px solid #e4e4e7;border-radius:99px;padding:5px 28px 5px 28px;font-size:.8rem;font-family:var(--font);color:var(--text);background:#f4f4f5;outline:none;width:200px;transition:border-color .15s,background .15s,box-shadow .15s;}
   .search-input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(99,102,241,.12);}
   .search-input::placeholder{color:var(--muted);}
   .search-icon{position:absolute;left:9px;font-size:.78rem;pointer-events:none;opacity:.45;}
@@ -329,15 +330,18 @@
 
 <!-- Filter bar -->
 <div class="filter-bar hidden style-compact" id="filter-bar">
-  <div class="search-input-wrap">
-    <span class="search-icon">🔍</span>
-    <input class="search-input" id="search-input" type="search" placeholder="Rechercher…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSearch();this.blur();}"/>
-    <button class="search-clear" id="search-clear-btn" onclick="clearSearch()" type="button" title="Effacer">✕</button>
-  </div>
   <button class="filter-toggle" id="filter-toggle-btn" onclick="toggleFilterExpanded()" type="button">
-    <span>Filtres</span>
+    <span>🔍 Filtres</span>
     <span class="filter-badge empty" id="filter-toggle-badge">0</span>
   </button>
+  <div class="filter-group search-group">
+    <div class="search-input-wrap">
+      <span class="search-icon">🔍</span>
+      <input class="search-input" id="search-input" type="search" placeholder="Rechercher…" oninput="onSearchInput(this.value)" onkeydown="if(event.key==='Escape'){clearSearch();this.blur();}"/>
+      <button class="search-clear" id="search-clear-btn" onclick="clearSearch()" type="button" title="Effacer">✕</button>
+    </div>
+  </div>
+  <div class="filter-divider"></div>
   <div class="filter-group" id="filter-priority-group">
     <span class="filter-label">⚡ Priorité</span>
   </div>
@@ -1064,12 +1068,11 @@ function refreshFilterBar(){
   const totalActive=activeFilters.priority.size+activeFilters.category.size+(searchQuery?1:0);
   document.getElementById("filter-clear-btn").disabled=totalActive===0;
   const badge=document.getElementById("filter-toggle-badge");
-  const chipActive=activeFilters.priority.size+activeFilters.category.size;
-  badge.textContent=chipActive; badge.classList.toggle("empty",chipActive===0);
-  // Auto-expand compact bar when chip filters are applied; collapse when cleared
+  badge.textContent=totalActive; badge.classList.toggle("empty",totalActive===0);
+  // Auto-expand compact bar when any filter is active; collapse when all cleared
   const bar=document.getElementById("filter-bar");
   if(bar.classList.contains("style-compact")){
-    if(chipActive>0)bar.classList.add("expanded");
+    if(totalActive>0)bar.classList.add("expanded");
     else bar.classList.remove("expanded");
   }
   // Match count

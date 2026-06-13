@@ -927,7 +927,7 @@ function countStack(stackId){return Object.values(tasks).flat().filter(t=>t.stac
 function renderBoard(){
   const board=document.getElementById("board"); board.innerHTML="";
   if(selectMode)board.classList.add("select-mode");
-  const filterActive=activeFilters.priority.size+activeFilters.category.size>0;
+  const filterActive=activeFilters.priority.size+activeFilters.category.size>0||!!searchQuery;
   const dimMode=FILTER_MODE==="dim";
   COLS.forEach(col=>{
     const allItems=tasks[col.id]||[];

@@ -1631,7 +1631,9 @@ async function toggleChecklistItem(itemId,checked){
   try{
     await api.patch(`/api/tasks/${currentTaskId}/checklist/${itemId}`,{checked:checked?1:0});
     const t=await api.get(`/api/tasks/${currentTaskId}`);
-    renderChecklist(t.checklist||[]); await loadBoard();
+    renderChecklist(t.checklist||[]);
+    if(checked)renderComments(t.comments||[]);
+    await loadBoard();
   }catch(e){if(e.message!=="unauth")toast("Erreur.",true);}
 }
 async function deleteChecklistItem(itemId){

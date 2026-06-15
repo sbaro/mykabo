@@ -771,19 +771,29 @@ def add_checklist_item(task_id: int, body: ChecklistItemCreate,
 def update_checklist_item(task_id: int, item_id: int, body: ChecklistItemUpdate,
                           session: str = Depends(require_auth)):
     conn = get_db()
-    if not conn.execute(
-        "SELECT id FROM checklist_items WHERE id=? AND task_id=?", (item_id, task_id)
-    ).fetchone():
+    row = conn.execute(
+        "SELECT * FROM checklist_items WHERE id=? AND task_id=?", (item_id, task_id)
+    ).fetchone()
+    if not row:
         conn.close()
         raise HTTPException(404, "Checklist item not found")
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if "text" in fields:
         fields["text"] = fields["text"].strip() or fields.pop("text")
+    was_checked = bool(row["checked"])
+    now_checked = bool(fields.get("checked", was_checked))
     if fields:
         sets = ", ".join(f"{k}=?" for k in fields)
         conn.execute(f"UPDATE checklist_items SET {sets} WHERE id=?",
                      (*fields.values(), item_id))
-        conn.commit()
+    # Auto-comment when an item transitions unchecked → checked
+    if not was_checked and now_checked:
+        item_text = fields.get("text", row["text"])
+        conn.execute(
+            "INSERT INTO comments (task_id, content) VALUES (?,?)",
+            (task_id, f"☑️ Sous-tâche réalisée : {item_text}")
+        )
+    conn.commit()
     row = conn.execute("SELECT * FROM checklist_items WHERE id=?", (item_id,)).fetchone()
     conn.close()
     return row_to_dict(row)

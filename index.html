@@ -194,6 +194,17 @@
   .checklist-progress{background:#e0e7ff!important;color:#3730a3!important;font-variant-numeric:tabular-nums;}
   .block-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center;padding:16px;}
   .block-overlay.open{display:flex;}
+  /* Keyboard shortcuts help overlay */
+  .kbd-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:400;align-items:center;justify-content:center;padding:16px;}
+  .kbd-overlay.open{display:flex;}
+  .kbd-box{background:#fff;border-radius:14px;padding:28px 32px;max-width:420px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25);}
+  .kbd-box h2{margin:0 0 18px;font-size:1.05rem;color:var(--text);}
+  .kbd-table{width:100%;border-collapse:collapse;font-size:.82rem;}
+  .kbd-table tr+tr td{border-top:1px solid #f4f4f5;}
+  .kbd-table td{padding:7px 4px;color:var(--text);}
+  .kbd-table td:first-child{text-align:right;padding-right:14px;width:60px;}
+  kbd{display:inline-block;background:#f4f4f5;border:1.5px solid #d4d4d8;border-bottom-width:3px;border-radius:5px;padding:2px 7px;font-family:var(--font);font-size:.78rem;font-weight:700;color:var(--text);line-height:1.4;}
+  .kbd-close{display:block;margin-top:18px;width:100%;text-align:center;}
   .block-modal{background:#fff;border-radius:14px;width:100%;max-width:400px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25);}
   .block-modal h2{font-size:1rem;margin-bottom:6px;}
   .block-modal p{font-size:.82rem;color:var(--muted);margin-bottom:16px;}
@@ -540,8 +551,7 @@
 </div>
 
 <!-- Account / credentials modal -->
-<div class="overlay" id="account-overlay">
-  <div class="modal" style="max-width:420px">
+<div class="overlay" id="account-overlay">  <div class="modal" style="max-width:420px">
     <h2>👤 Mon compte</h2>
     <p class="subtitle">Modifiez votre nom d'utilisateur ou votre mot de passe.</p>
     <div class="form-group">
@@ -565,6 +575,22 @@
       <button class="btn btn-ghost" onclick="closeAccountModal()">Annuler</button>
       <button class="btn btn-primary" onclick="saveCredentials()">Enregistrer</button>
     </div>
+  </div>
+</div>
+
+<!-- Keyboard shortcuts help overlay -->
+<div class="kbd-overlay" id="kbd-overlay" onclick="if(event.target===this)closeKbdHelp()">
+  <div class="kbd-box">
+    <h2>⌨️ Raccourcis clavier</h2>
+    <table class="kbd-table">
+      <tr><td><kbd>N</kbd></td><td>Nouvelle tâche</td></tr>
+      <tr><td><kbd>/</kbd></td><td>Rechercher</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Ouvrir / fermer les filtres</td></tr>
+      <tr><td><kbd>S</kbd></td><td>Mode sélection</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Fermer la fenêtre active</td></tr>
+      <tr><td><kbd>?</kbd></td><td>Afficher cette aide</td></tr>
+    </table>
+    <button class="btn btn-ghost kbd-close" onclick="closeKbdHelp()">Fermer</button>
   </div>
 </div>
 
@@ -1789,15 +1815,71 @@ function darken(hex){let c=hex.replace("#","");if(c.length===3)c=c.split("").map
 function esc(s){return(s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
+function openKbdHelp(){document.getElementById("kbd-overlay").classList.add("open");}
+function closeKbdHelp(){document.getElementById("kbd-overlay").classList.remove("open");}
+
+function _anyModalOpen(){
+  return ["overlay","account-overlay","import-overlay","archive-panel","stack-panel","kbd-overlay"]
+    .some(id=>document.getElementById(id)?.classList.contains("open"));
+}
+function _closeTopModal(){
+  // Close in reverse priority order
+  for(const id of ["kbd-overlay","account-overlay","import-overlay","archive-panel","stack-panel","overlay","block-overlay","wip-overlay","bulk-overlay"]){
+    const el=document.getElementById(id);
+    if(el&&el.classList.contains("open")){
+      if(id==="overlay")closeModal();
+      else if(id==="archive-panel")closeArchive();
+      else if(id==="stack-panel")closeStackPanel();
+      else if(id==="account-overlay")closeAccountModal();
+      else if(id==="import-overlay")closeImportModal();
+      else if(id==="bulk-overlay")closeBulkModal();
+      else if(id==="block-overlay")cancelBlock();
+      else if(id==="wip-overlay")closeWipModal();
+      else if(id==="kbd-overlay")closeKbdHelp();
+      return true;
+    }
+  }
+  return false;
+}
+
 document.addEventListener("keydown",e=>{
-  if(e.key==="/"&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
-    const tag=document.activeElement?.tagName;
-    if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT")return;
-    e.preventDefault();
-    const bar=document.getElementById("filter-bar");
-    if(bar&&bar.classList.contains("style-compact"))bar.classList.add("expanded");
-    const inp=document.getElementById("search-input");
-    if(inp){inp.focus();inp.select();}
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  const tag=document.activeElement?.tagName;
+  const inField=tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT";
+
+  // Esc: always close the top-most open modal/panel
+  if(e.key==="Escape"){_closeTopModal();return;}
+
+  // All other shortcuts disabled when typing in a field
+  if(inField)return;
+
+  // Also skip if a blocking modal is open (except Esc handled above)
+  if(_anyModalOpen())return;
+
+  switch(e.key){
+    case "/":
+      e.preventDefault();
+      {const bar=document.getElementById("filter-bar");
+      if(bar&&bar.classList.contains("style-compact"))bar.classList.add("expanded");
+      const inp=document.getElementById("search-input");
+      if(inp){inp.focus();inp.select();}}
+      break;
+    case "n": case "N":
+      e.preventDefault();
+      openNew();
+      break;
+    case "f": case "F":
+      e.preventDefault();
+      toggleFilterExpanded();
+      break;
+    case "s": case "S":
+      e.preventDefault();
+      toggleSelectMode();
+      break;
+    case "?":
+      e.preventDefault();
+      openKbdHelp();
+      break;
   }
 });
 

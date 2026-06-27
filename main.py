@@ -130,6 +130,7 @@ def init_db():
         archived_at TEXT DEFAULT NULL,
         stack_id    TEXT DEFAULT NULL,
         stack_pos   INTEGER DEFAULT 0,
+        workspace   TEXT NOT NULL DEFAULT 'perso',
         created_at  TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS comments (
@@ -160,6 +161,10 @@ def init_db():
         WHERE stack_id IS NOT NULL""")
     # Migrations
     existing = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    # An existing DB that predates workspaces: all its data is migrated to 'pro'
+    # (the user's pre-existing board), leaving 'perso' empty for new use.
+    migrating_to_workspaces = "workspace" not in existing
+    legacy_ws = "pro" if migrating_to_workspaces else "perso"
     for col, defn in [
         ("archived",     "INTEGER DEFAULT 0"),
         ("archived_at",  "TEXT DEFAULT NULL"),
@@ -167,26 +172,60 @@ def init_db():
         ("stack_pos",    "INTEGER DEFAULT 0"),
         ("recurrence",   "TEXT DEFAULT NULL"),
         ("snooze_until", "TEXT DEFAULT NULL"),
+        ("workspace",    "TEXT NOT NULL DEFAULT 'perso'"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")
+    if migrating_to_workspaces:
+        conn.execute("UPDATE tasks SET workspace='pro'")
     c.execute("""CREATE TABLE IF NOT EXISTS sessions (
         token      TEXT PRIMARY KEY,
         expires_at REAL NOT NULL
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS wip_limits (
-        col_id    TEXT PRIMARY KEY,
-        max_tasks INTEGER NOT NULL CHECK(max_tasks > 0)
+        workspace TEXT NOT NULL DEFAULT 'perso',
+        col_id    TEXT NOT NULL,
+        max_tasks INTEGER NOT NULL CHECK(max_tasks > 0),
+        PRIMARY KEY (workspace, col_id)
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS categories (
-        id       INTEGER PRIMARY KEY AUTOINCREMENT,
-        name     TEXT NOT NULL UNIQUE,
-        position INTEGER NOT NULL DEFAULT 0
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        name      TEXT NOT NULL,
+        position  INTEGER NOT NULL DEFAULT 0,
+        workspace TEXT NOT NULL DEFAULT 'perso',
+        UNIQUE (workspace, name)
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS config (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""")
+    # Structural migrations: add workspace scoping to pre-existing tables.
+    # CREATE TABLE IF NOT EXISTS above is a no-op on old DBs, so rebuild here.
+    wip_cols = {r[1] for r in conn.execute("PRAGMA table_info(wip_limits)").fetchall()}
+    if "workspace" not in wip_cols:
+        conn.execute("ALTER TABLE wip_limits RENAME TO wip_limits_old")
+        conn.execute("""CREATE TABLE wip_limits (
+            workspace TEXT NOT NULL DEFAULT 'perso',
+            col_id    TEXT NOT NULL,
+            max_tasks INTEGER NOT NULL CHECK(max_tasks > 0),
+            PRIMARY KEY (workspace, col_id)
+        )""")
+        conn.execute("INSERT INTO wip_limits (workspace, col_id, max_tasks) "
+                     "SELECT ?, col_id, max_tasks FROM wip_limits_old", (legacy_ws,))
+        conn.execute("DROP TABLE wip_limits_old")
+    cat_cols = {r[1] for r in conn.execute("PRAGMA table_info(categories)").fetchall()}
+    if "workspace" not in cat_cols:
+        conn.execute("ALTER TABLE categories RENAME TO categories_old")
+        conn.execute("""CREATE TABLE categories (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name      TEXT NOT NULL,
+            position  INTEGER NOT NULL DEFAULT 0,
+            workspace TEXT NOT NULL DEFAULT 'perso',
+            UNIQUE (workspace, name)
+        )""")
+        conn.execute("INSERT INTO categories (id, name, position, workspace) "
+                     "SELECT id, name, position, ? FROM categories_old", (legacy_ws,))
+        conn.execute("DROP TABLE categories_old")
     # One-time seed: import distinct categories from existing tasks
     if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
         distinct = conn.execute(
@@ -196,9 +235,14 @@ def init_db():
         ).fetchall()
         for i, row in enumerate(distinct):
             conn.execute(
-                "INSERT OR IGNORE INTO categories (name, position) VALUES (?, ?)",
-                (row["category"], i)
+                "INSERT OR IGNORE INTO categories (name, position, workspace) VALUES (?, ?, ?)",
+                (row["category"], i, legacy_ws)
             )
+    # Land the user on their migrated board (pro) instead of the empty perso one.
+    if migrating_to_workspaces:
+        conn.execute(
+            "INSERT OR REPLACE INTO config (key, value) VALUES ('active_workspace', 'pro')"
+        )
     conn.commit()
     conn.close()
 
@@ -221,6 +265,25 @@ _load_stored_credentials()
 
 # ─── MODELS ───────────────────────────────────────────────────────────────────
 COLUMNS = ["backlog","todo","inprogress","blocked","done","abandoned"]
+WORKSPACES = ("perso", "pro")
+DEFAULT_WORKSPACE = "perso"
+
+def get_active_workspace(conn) -> str:
+    row = conn.execute(
+        "SELECT value FROM config WHERE key='active_workspace'"
+    ).fetchone()
+    if row and row["value"] in WORKSPACES:
+        return row["value"]
+    return DEFAULT_WORKSPACE
+
+def set_active_workspace(conn, ws: str):
+    conn.execute(
+        "INSERT OR REPLACE INTO config (key, value) VALUES ('active_workspace', ?)",
+        (ws,),
+    )
+
+class WorkspaceUpdate(BaseModel):
+    workspace: str
 
 class LoginRequest(BaseModel):
     username: str
@@ -333,13 +396,15 @@ def _has_cycle(edges: dict[int, set[int]]) -> bool:
 
 # Returns the canonical category value. Empty/None clears it; otherwise it must
 # match an existing category name in the categories table (strict mode).
-def _validate_category(conn, value) -> str:
+def _validate_category(conn, value, ws) -> str:
     if value is None or value == "":
         return ""
     name = value.strip()
     if not name:
         return ""
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+    if not conn.execute(
+        "SELECT 1 FROM categories WHERE name=? AND workspace=?", (name, ws)
+    ).fetchone():
         raise HTTPException(
             400,
             f"Cat\u00e9gorie inconnue : \u00ab\u00a0{name}\u00a0\u00bb. Cr\u00e9ez-la d'abord via la gestion des cat\u00e9gories."
@@ -373,7 +438,28 @@ def logout(response: Response, session: Optional[str] = Cookie(default=None)):
 
 @app.get("/api/me")
 def me(session: str = Depends(require_auth)):
-    return {"username": USERNAME}
+    conn = get_db()
+    ws = get_active_workspace(conn)
+    conn.close()
+    return {"username": USERNAME, "workspace": ws}
+
+# ─── WORKSPACE ────────────────────────────────────────────────────────────────
+@app.get("/api/workspace")
+def get_workspace(session: str = Depends(require_auth)):
+    conn = get_db()
+    ws = get_active_workspace(conn)
+    conn.close()
+    return {"active": ws, "available": list(WORKSPACES)}
+
+@app.put("/api/workspace")
+def put_workspace(body: WorkspaceUpdate, session: str = Depends(require_auth)):
+    if body.workspace not in WORKSPACES:
+        raise HTTPException(400, "Espace de travail inconnu")
+    conn = get_db()
+    set_active_workspace(conn, body.workspace)
+    conn.commit()
+    conn.close()
+    return {"active": body.workspace}
 
 @app.patch("/api/credentials")
 def change_credentials(body: ChangeCredentials, session: str = Depends(require_auth)):
@@ -407,8 +493,10 @@ def change_credentials(body: ChangeCredentials, session: str = Depends(require_a
 @app.get("/api/tasks")
 def get_tasks(session: str = Depends(require_auth)):
     conn = get_db()
+    ws = get_active_workspace(conn)
     rows = conn.execute(
-        "SELECT * FROM tasks WHERE archived=0 ORDER BY column, position, id"
+        "SELECT * FROM tasks WHERE archived=0 AND workspace=? ORDER BY column, position, id",
+        (ws,),
     ).fetchall()
     # Inline latest block reason to avoid N+1 on the frontend
     block_reasons: dict[int, str] = {}
@@ -468,8 +556,10 @@ def get_tasks(session: str = Depends(require_auth)):
 @app.get("/api/tasks/archived")
 def get_archived(session: str = Depends(require_auth)):
     conn = get_db()
+    ws = get_active_workspace(conn)
     rows = conn.execute(
-        "SELECT * FROM tasks WHERE archived=1 ORDER BY archived_at DESC"
+        "SELECT * FROM tasks WHERE archived=1 AND workspace=? ORDER BY archived_at DESC",
+        (ws,),
     ).fetchall()
     conn.close()
     return [row_to_dict(r) for r in rows]
@@ -477,18 +567,20 @@ def get_archived(session: str = Depends(require_auth)):
 @app.post("/api/tasks", status_code=201)
 def create_task(task: TaskCreate, session: str = Depends(require_auth)):
     conn = get_db()
-    category = _validate_category(conn, task.category)
+    ws = get_active_workspace(conn)
+    category = _validate_category(conn, task.category, ws)
     mp = conn.execute(
-        "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column=?", (task.column,)
+        "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column=? AND workspace=?",
+        (task.column, ws),
     ).fetchone()[0]
     recurrence = task.recurrence if task.recurrence in RECURRENCES else None
     c = conn.cursor()
     c.execute(
-        "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position,recurrence,snooze_until)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO tasks (title,description,column,color,category,priority,due_date,position,recurrence,snooze_until,workspace)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (task.title, task.description, task.column, task.color,
          category, task.priority, task.due_date, mp + 1, recurrence,
-         task.snooze_until or None)
+         task.snooze_until or None, ws)
     )
     tid = c.lastrowid
     conn.commit()
@@ -527,7 +619,8 @@ def update_task(task_id: int, update: TaskUpdate, session: str = Depends(require
     fields = {k: v for k, v in update.model_dump().items()
               if v is not None and k in _TASK_WRITABLE}
     if "category" in fields:
-        fields["category"] = _validate_category(conn, fields["category"])
+        fields["category"] = _validate_category(
+            conn, fields["category"], get_active_workspace(conn))
     if "recurrence" in fields and fields["recurrence"] not in RECURRENCES:
         fields.pop("recurrence")
     if "snooze_until" in fields and not fields["snooze_until"]:
@@ -566,16 +659,18 @@ def archive_task(task_id: int, session: str = Depends(require_auth)):
     next_task = None
     if task_data.get("recurrence") in RECURRENCES:
         next_due = _next_due(task_data.get("due_date"), task_data["recurrence"])
+        ws = task_data.get("workspace") or DEFAULT_WORKSPACE
         mp = conn.execute(
-            "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column='backlog'"
+            "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column='backlog' AND workspace=?",
+            (ws,),
         ).fetchone()[0]
         c = conn.cursor()
         c.execute(
             "INSERT INTO tasks (title,description,column,color,category,priority,"
-            "due_date,position,recurrence) VALUES (?,?,?,?,?,?,?,?,?)",
+            "due_date,position,recurrence,workspace) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (task_data["title"], task_data["description"], "backlog",
              task_data["color"], task_data["category"], task_data["priority"],
-             next_due, mp + 1, task_data["recurrence"])
+             next_due, mp + 1, task_data["recurrence"], ws)
         )
         new_id = c.lastrowid
         conn.commit()
@@ -618,7 +713,10 @@ def delete_task(task_id: int, session: str = Depends(require_auth)):
 @app.get("/api/wip_limits")
 def get_wip_limits(session: str = Depends(require_auth)):
     conn = get_db()
-    rows = conn.execute("SELECT col_id, max_tasks FROM wip_limits").fetchall()
+    ws = get_active_workspace(conn)
+    rows = conn.execute(
+        "SELECT col_id, max_tasks FROM wip_limits WHERE workspace=?", (ws,)
+    ).fetchall()
     conn.close()
     return {r["col_id"]: r["max_tasks"] for r in rows}
 
@@ -628,15 +726,19 @@ def set_wip_limit(col_id: str, body: WipLimitUpdate,
     if col_id not in COLUMNS:
         raise HTTPException(400, f"Colonne inconnue : {col_id}")
     conn = get_db()
+    ws = get_active_workspace(conn)
     if body.max_tasks is None or body.max_tasks <= 0:
-        conn.execute("DELETE FROM wip_limits WHERE col_id=?", (col_id,))
+        conn.execute("DELETE FROM wip_limits WHERE col_id=? AND workspace=?",
+                     (col_id, ws))
     else:
         conn.execute(
-            "INSERT OR REPLACE INTO wip_limits (col_id, max_tasks) VALUES (?, ?)",
-            (col_id, body.max_tasks),
+            "INSERT OR REPLACE INTO wip_limits (workspace, col_id, max_tasks) VALUES (?, ?, ?)",
+            (ws, col_id, body.max_tasks),
         )
     conn.commit()
-    rows = conn.execute("SELECT col_id, max_tasks FROM wip_limits").fetchall()
+    rows = conn.execute(
+        "SELECT col_id, max_tasks FROM wip_limits WHERE workspace=?", (ws,)
+    ).fetchall()
     conn.close()
     return {r["col_id"]: r["max_tasks"] for r in rows}
 
@@ -644,7 +746,10 @@ def set_wip_limit(col_id: str, body: WipLimitUpdate,
 @app.get("/api/categories")
 def list_categories(session: str = Depends(require_auth)):
     conn = get_db()
-    rows = conn.execute("SELECT * FROM categories ORDER BY position, name").fetchall()
+    ws = get_active_workspace(conn)
+    rows = conn.execute(
+        "SELECT * FROM categories WHERE workspace=? ORDER BY position, name", (ws,)
+    ).fetchall()
     conn.close()
     return [row_to_dict(r) for r in rows]
 
@@ -656,15 +761,18 @@ def create_category(body: CategoryCreate, session: str = Depends(require_auth)):
     if len(name) > 50:
         raise HTTPException(400, "Nom trop long (50 caractères max).")
     conn = get_db()
-    if conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+    ws = get_active_workspace(conn)
+    if conn.execute(
+        "SELECT 1 FROM categories WHERE name=? AND workspace=?", (name, ws)
+    ).fetchone():
         conn.close()
         raise HTTPException(409, f"« {name} » existe déjà.")
     max_pos = conn.execute(
-        "SELECT COALESCE(MAX(position), -1) FROM categories"
+        "SELECT COALESCE(MAX(position), -1) FROM categories WHERE workspace=?", (ws,)
     ).fetchone()[0]
     c = conn.cursor()
-    c.execute("INSERT INTO categories (name, position) VALUES (?, ?)",
-              (name, max_pos + 1))
+    c.execute("INSERT INTO categories (name, position, workspace) VALUES (?, ?, ?)",
+              (name, max_pos + 1, ws))
     cid = c.lastrowid
     conn.commit()
     row = conn.execute("SELECT * FROM categories WHERE id=?", (cid,)).fetchone()
@@ -679,6 +787,7 @@ def update_category(cat_id: int, update: CategoryUpdate,
     if not row:
         conn.close()
         raise HTTPException(404, "Catégorie introuvable")
+    ws = row["workspace"]
     old_name = row["name"]
     if update.name is not None:
         new_name = update.name.strip()
@@ -690,16 +799,16 @@ def update_category(cat_id: int, update: CategoryUpdate,
             raise HTTPException(400, "Nom trop long (50 caractères max).")
         if new_name != old_name:
             dup = conn.execute(
-                "SELECT 1 FROM categories WHERE name=? AND id!=?",
-                (new_name, cat_id)
+                "SELECT 1 FROM categories WHERE name=? AND workspace=? AND id!=?",
+                (new_name, ws, cat_id)
             ).fetchone()
             if dup:
                 conn.close()
                 raise HTTPException(409, f"« {new_name} » existe déjà.")
             conn.execute("UPDATE categories SET name=? WHERE id=?", (new_name, cat_id))
-            # Propagate rename to all tasks using this category
-            conn.execute("UPDATE tasks SET category=? WHERE category=?",
-                         (new_name, old_name))
+            # Propagate rename to all tasks using this category (same workspace)
+            conn.execute("UPDATE tasks SET category=? WHERE category=? AND workspace=?",
+                         (new_name, old_name, ws))
     if update.position is not None:
         conn.execute("UPDATE categories SET position=? WHERE id=?",
                      (update.position, cat_id))
@@ -711,12 +820,15 @@ def update_category(cat_id: int, update: CategoryUpdate,
 @app.delete("/api/categories/{cat_id}", status_code=204)
 def delete_category(cat_id: int, session: str = Depends(require_auth)):
     conn = get_db()
-    row = conn.execute("SELECT name FROM categories WHERE id=?", (cat_id,)).fetchone()
+    row = conn.execute(
+        "SELECT name, workspace FROM categories WHERE id=?", (cat_id,)
+    ).fetchone()
     if not row:
         conn.close()
         raise HTTPException(404, "Catégorie introuvable")
-    # Silently clear the category on all affected tasks, then delete.
-    conn.execute("UPDATE tasks SET category='' WHERE category=?", (row["name"],))
+    # Silently clear the category on all affected tasks (same workspace), then delete.
+    conn.execute("UPDATE tasks SET category='' WHERE category=? AND workspace=?",
+                 (row["name"], row["workspace"]))
     conn.execute("DELETE FROM categories WHERE id=?", (cat_id,))
     conn.commit()
     conn.close()
@@ -811,17 +923,20 @@ def delete_checklist_item(task_id: int, item_id: int,
 def set_dependencies(task_id: int, body: DependencyUpdate,
                      session: str = Depends(require_auth)):
     conn = get_db()
-    if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
+    trow = conn.execute("SELECT workspace FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if not trow:
         conn.close()
         raise HTTPException(404, "Task not found")
-    # Sanitise: drop self-references and duplicates, validate existence
+    ws = trow["workspace"]
+    # Sanitise: drop self-references and duplicates, validate existence.
+    # Dependencies must live in the same workspace (watertight separation).
     deps: list[int] = []
     seen: set[int] = set()
     for dep in body.depends_on:
         if dep == task_id or dep in seen:
             continue
         if not conn.execute(
-            "SELECT id FROM tasks WHERE id=? AND archived=0", (dep,)
+            "SELECT id FROM tasks WHERE id=? AND archived=0 AND workspace=?", (dep, ws)
         ).fetchone():
             conn.close()
             raise HTTPException(400, f"Tâche {dep} introuvable")
@@ -976,9 +1091,10 @@ def move_stack(stack_id: str, update: TaskUpdate,
 @app.get("/api/export")
 def export_data(session: str = Depends(require_auth)):
     conn = get_db()
-    rows      = conn.execute("SELECT * FROM tasks ORDER BY id").fetchall()
-    cats      = conn.execute("SELECT * FROM categories ORDER BY position, name").fetchall()
-    wip_rows  = conn.execute("SELECT col_id, max_tasks FROM wip_limits").fetchall()
+    ws = get_active_workspace(conn)
+    rows      = conn.execute("SELECT * FROM tasks WHERE workspace=? ORDER BY id", (ws,)).fetchall()
+    cats      = conn.execute("SELECT * FROM categories WHERE workspace=? ORDER BY position, name", (ws,)).fetchall()
+    wip_rows  = conn.execute("SELECT col_id, max_tasks FROM wip_limits WHERE workspace=?", (ws,)).fetchall()
     task_list = []
     for t in rows:
         d = row_to_dict(t)
@@ -994,11 +1110,12 @@ def export_data(session: str = Depends(require_auth)):
     payload = {
         "schema_version": 1,
         "exported_at": datetime.now(timezone.utc).isoformat(),
+        "workspace": ws,
         "categories": [row_to_dict(c) for c in cats],
         "wip_limits": {r["col_id"]: r["max_tasks"] for r in wip_rows},
         "tasks": task_list,
     }
-    filename = f"mykabo-export-{date.today().isoformat()}.json"
+    filename = f"mykabo-export-{ws}-{date.today().isoformat()}.json"
     return Response(
         content=json.dumps(payload, ensure_ascii=False, indent=2),
         media_type="application/json",
@@ -1013,30 +1130,33 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise HTTPException(400, "Fichier invalide ou version de schéma non supportée")
     conn = get_db()
+    ws = get_active_workspace(conn)
     try:
         if body.mode == "replace":
-            conn.execute("DELETE FROM task_dependencies")
-            conn.execute("DELETE FROM comments")
-            conn.execute("DELETE FROM tasks")
-            conn.execute("DELETE FROM categories")
-            conn.execute("DELETE FROM wip_limits")
+            # Replace only the active workspace; the other workspace is untouched.
+            # Deleting tasks cascades to comments, checklist items and dependencies.
+            conn.execute("DELETE FROM tasks WHERE workspace=?", (ws,))
+            conn.execute("DELETE FROM categories WHERE workspace=?", (ws,))
+            conn.execute("DELETE FROM wip_limits WHERE workspace=?", (ws,))
         # Categories
         for cat in data.get("categories", []):
             name = (cat.get("name") or "").strip()
             if not name:
                 continue
-            if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+            if not conn.execute(
+                "SELECT 1 FROM categories WHERE name=? AND workspace=?", (name, ws)
+            ).fetchone():
                 max_pos = conn.execute(
-                    "SELECT COALESCE(MAX(position),-1) FROM categories"
+                    "SELECT COALESCE(MAX(position),-1) FROM categories WHERE workspace=?", (ws,)
                 ).fetchone()[0]
-                conn.execute("INSERT INTO categories (name, position) VALUES (?,?)",
-                             (name, max_pos + 1))
+                conn.execute("INSERT INTO categories (name, position, workspace) VALUES (?,?,?)",
+                             (name, max_pos + 1, ws))
         # WIP limits
         for col_id, max_tasks in data.get("wip_limits", {}).items():
             if col_id in COLUMNS and isinstance(max_tasks, int) and max_tasks > 0:
                 conn.execute(
-                    "INSERT OR REPLACE INTO wip_limits (col_id, max_tasks) VALUES (?,?)",
-                    (col_id, max_tasks),
+                    "INSERT OR REPLACE INTO wip_limits (workspace, col_id, max_tasks) VALUES (?,?,?)",
+                    (ws, col_id, max_tasks),
                 )
         # Tasks — remap IDs and stack_ids to avoid collisions
         stack_id_map: dict[str, str] = {}
@@ -1051,7 +1171,7 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
                 new_sid = stack_id_map[old_sid]
             category = t.get("category") or ""
             if category and not conn.execute(
-                "SELECT 1 FROM categories WHERE name=?", (category,)
+                "SELECT 1 FROM categories WHERE name=? AND workspace=?", (category, ws)
             ).fetchone():
                 category = ""
             recurrence = t.get("recurrence")
@@ -1061,7 +1181,7 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
             c.execute(
                 "INSERT INTO tasks (title,description,column,color,category,priority,"
                 "due_date,position,archived,archived_at,stack_id,stack_pos,"
-                "recurrence,snooze_until,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "recurrence,snooze_until,workspace,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     t.get("title",""), t.get("description",""),
                     t.get("column","backlog"), t.get("color","#fef08a"),
@@ -1069,7 +1189,7 @@ def import_data(body: ImportRequest, session: str = Depends(require_auth)):
                     t.get("due_date"), t.get("position",0),
                     int(bool(t.get("archived",0))), t.get("archived_at"),
                     new_sid, t.get("stack_pos",0),
-                    recurrence, t.get("snooze_until"),
+                    recurrence, t.get("snooze_until"), ws,
                     t.get("created_at", datetime.now(timezone.utc).isoformat()),
                 ),
             )

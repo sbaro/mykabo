@@ -21,6 +21,12 @@
   .hdr-btn{background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:7px;padding:6px 13px;cursor:pointer;font-size:.8rem;display:flex;align-items:center;gap:6px;transition:background .15s;white-space:nowrap;}
   .hdr-btn:hover{background:rgba(255,255,255,.22);}
   .hdr-btn.active{background:var(--accent);}
+  /* Workspace (perso/pro) segmented toggle */
+  .ws-toggle{display:none;background:rgba(0,0,0,.22);border-radius:8px;padding:3px;gap:2px;}
+  .ws-toggle.visible{display:inline-flex;}
+  .ws-toggle button{background:none;border:none;color:rgba(255,255,255,.7);border-radius:6px;padding:5px 13px;cursor:pointer;font-size:.8rem;font-weight:600;font-family:var(--font);display:flex;align-items:center;gap:5px;transition:background .15s,color .15s;white-space:nowrap;}
+  .ws-toggle button:hover{color:#fff;}
+  .ws-toggle button.active{background:#fff;color:var(--col-header);box-shadow:0 1px 3px rgba(0,0,0,.2);}
   /* toast */
   #toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#18181b;color:#fff;border-radius:10px;padding:10px 20px;font-size:.85rem;z-index:500;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -311,6 +317,10 @@
     <polygon points="24,1 24.7,3.2 27,3.2 25.2,4.5 25.9,6.7 24,5.4 22.1,6.7 22.8,4.5 21,3.2 23.3,3.2" fill="#fde68a"/>
   </svg>
   <h1>MyKaBo</h1>
+  <div class="ws-toggle" id="ws-toggle">
+    <button id="ws-perso" onclick="switchWorkspace('perso')" type="button">🏠 Perso</button>
+    <button id="ws-pro"   onclick="switchWorkspace('pro')"   type="button">💼 Pro</button>
+  </div>
   <div class="header-right">
     <span id="today"></span>
     <button class="hdr-btn" id="select-mode-btn" style="display:none" onclick="toggleSelectMode()">☑️ Sélection</button>
@@ -674,12 +684,33 @@ const api={
 function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
   document.getElementById("filter-bar").classList.add("hidden");
+  document.getElementById("ws-toggle").classList.remove("visible");
   ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","snooze-btn","export-btn","import-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
   document.getElementById("filter-bar").classList.remove("hidden");
+  document.getElementById("ws-toggle").classList.add("visible");
   ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","export-btn","import-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
+}
+let activeWorkspace="perso";
+function refreshWorkspaceToggle(){
+  document.getElementById("ws-perso").classList.toggle("active",activeWorkspace==="perso");
+  document.getElementById("ws-pro").classList.toggle("active",activeWorkspace==="pro");
+}
+async function switchWorkspace(ws){
+  if(ws===activeWorkspace)return;
+  try{
+    await api.put("/api/workspace",{workspace:ws});
+    activeWorkspace=ws;
+    refreshWorkspaceToggle();
+    // Reset transient view state and reload the other workspace from scratch
+    if(selectMode)cancelSelectMode();
+    clearAllFilters();
+    showSnoozed=false;
+    await loadCategories();
+    await loadBoard();
+  }catch(e){if(e.message!=="unauth")toast("Impossible de changer d'espace.",true);}
 }
 async function doLogin(){
   const u=document.getElementById("l-user").value.trim(), p=document.getElementById("l-pass").value;
@@ -690,7 +721,10 @@ async function doLogin(){
     await api.post("/api/login",{username:u,password:p,remember});
     document.getElementById("l-pass").value="";
     currentUsername=u;
-    hideLogin(); await loadCategories(); loadBoard();
+    hideLogin();
+    try{const w=await api.get("/api/workspace");activeWorkspace=w.active;}catch(_){ }
+    refreshWorkspaceToggle();
+    await loadCategories(); loadBoard();
   }catch(e){
     errEl.textContent=e.message==="ratelimit"
       ? "Trop de tentatives. Réessayez dans quelques minutes."
@@ -1884,7 +1918,7 @@ document.addEventListener("keydown",e=>{
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-api.get("/api/me").then(async u=>{currentUsername=u.username||"";hideLogin(); await loadCategories(); loadBoard();}).catch(()=>showLogin());
+api.get("/api/me").then(async u=>{currentUsername=u.username||"";activeWorkspace=u.workspace||"perso";hideLogin();refreshWorkspaceToggle(); await loadCategories(); loadBoard();}).catch(()=>showLogin());
 </script>
 </body>
 </html>

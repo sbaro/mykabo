@@ -347,6 +347,8 @@
   <button class="mt-btn" onclick="openBulkModal('due_date')">📅 Échéance</button>
   <button class="mt-btn" onclick="openBulkModal('column')">📂 Colonne</button>
   <span class="sep"></span>
+  <button class="mt-btn" id="mt-move-ws-btn" onclick="bulkMoveWorkspace()"></button>
+  <span class="sep"></span>
   <button class="mt-btn" onclick="cancelSelectMode()" style="opacity:.7">✕</button>
 </div>
 
@@ -747,7 +749,24 @@ function updateToolbar(){
   const n=selectedIds.size;
   document.getElementById("sel-count").textContent=n;
   document.getElementById("mt-stack-btn").style.display=n>=2?"flex":"none";
+  const target=activeWorkspace==="perso"?"pro":"perso";
+  const label=target==="pro"?"💼 Basculer en Pro":"🏠 Basculer en Perso";
+  document.getElementById("mt-move-ws-btn").textContent=label;
   document.getElementById("multi-toolbar").classList.toggle("visible",selectMode&&n>0);
+}
+async function bulkMoveWorkspace(){
+  if(!selectedIds.size)return;
+  const target=activeWorkspace==="perso"?"pro":"perso";
+  const ids=[...selectedIds];
+  try{
+    const r=await api.post("/api/tasks/move-workspace",{task_ids:ids,workspace:target});
+    cancelSelectMode();
+    await loadBoard();
+    const where=target==="pro"?"Pro":"Perso";
+    let msg=`${r.moved} tâche${r.moved>1?"s":""} basculée${r.moved>1?"s":""} en ${where}.`;
+    if(r.dropped_category)msg+=` (${r.dropped_category} catégorie${r.dropped_category>1?"s":""} non présente${r.dropped_category>1?"s":""} dans ${where} retirée${r.dropped_category>1?"s":""}.)`;
+    toast(msg);
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors du changement d'espace.",true);}
 }
 
 // ── STACKS ────────────────────────────────────────────────────────────────────

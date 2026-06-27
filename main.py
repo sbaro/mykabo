@@ -161,6 +161,10 @@ def init_db():
         WHERE stack_id IS NOT NULL""")
     # Migrations
     existing = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+    # An existing DB that predates workspaces: all its data is migrated to 'pro'
+    # (the user's pre-existing board), leaving 'perso' empty for new use.
+    migrating_to_workspaces = "workspace" not in existing
+    legacy_ws = "pro" if migrating_to_workspaces else "perso"
     for col, defn in [
         ("archived",     "INTEGER DEFAULT 0"),
         ("archived_at",  "TEXT DEFAULT NULL"),
@@ -172,6 +176,8 @@ def init_db():
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")
+    if migrating_to_workspaces:
+        conn.execute("UPDATE tasks SET workspace='pro'")
     c.execute("""CREATE TABLE IF NOT EXISTS sessions (
         token      TEXT PRIMARY KEY,
         expires_at REAL NOT NULL
@@ -205,7 +211,7 @@ def init_db():
             PRIMARY KEY (workspace, col_id)
         )""")
         conn.execute("INSERT INTO wip_limits (workspace, col_id, max_tasks) "
-                     "SELECT 'perso', col_id, max_tasks FROM wip_limits_old")
+                     "SELECT ?, col_id, max_tasks FROM wip_limits_old", (legacy_ws,))
         conn.execute("DROP TABLE wip_limits_old")
     cat_cols = {r[1] for r in conn.execute("PRAGMA table_info(categories)").fetchall()}
     if "workspace" not in cat_cols:
@@ -218,7 +224,7 @@ def init_db():
             UNIQUE (workspace, name)
         )""")
         conn.execute("INSERT INTO categories (id, name, position, workspace) "
-                     "SELECT id, name, position, 'perso' FROM categories_old")
+                     "SELECT id, name, position, ? FROM categories_old", (legacy_ws,))
         conn.execute("DROP TABLE categories_old")
     # One-time seed: import distinct categories from existing tasks
     if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
@@ -229,9 +235,14 @@ def init_db():
         ).fetchall()
         for i, row in enumerate(distinct):
             conn.execute(
-                "INSERT OR IGNORE INTO categories (name, position) VALUES (?, ?)",
-                (row["category"], i)
+                "INSERT OR IGNORE INTO categories (name, position, workspace) VALUES (?, ?, ?)",
+                (row["category"], i, legacy_ws)
             )
+    # Land the user on their migrated board (pro) instead of the empty perso one.
+    if migrating_to_workspaces:
+        conn.execute(
+            "INSERT OR REPLACE INTO config (key, value) VALUES ('active_workspace', 'pro')"
+        )
     conn.commit()
     conn.close()
 

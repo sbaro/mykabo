@@ -4,7 +4,7 @@ A self-hosted, single-user Kanban board for personal task management. Lightweigh
 
 ## Features
 
-- **Perso / Pro workspaces**: a global toggle switches between two fully separate, watertight sets of tasks, categories and WIP limits; the app reopens on the last selected workspace
+- **Perso / Pro workspaces**: a global toggle switches between two fully separate, watertight sets of tasks, categories and WIP limits; the app reopens on the last selected workspace (existing data from before this feature is migrated into the **Pro** workspace)
 - **6 columns**: Backlog, To Do, In Progress, Blocked, Done, Abandoned
 - **Drag-and-drop** cards between columns
 - **Rich task metadata**: title, description, color, category, priority, due date

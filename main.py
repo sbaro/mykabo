@@ -285,6 +285,10 @@ def set_active_workspace(conn, ws: str):
 class WorkspaceUpdate(BaseModel):
     workspace: str
 
+class MoveWorkspaceRequest(BaseModel):
+    task_ids: list[int]
+    workspace: str
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -708,6 +712,61 @@ def delete_task(task_id: int, session: str = Depends(require_auth)):
     conn.execute("DELETE FROM tasks WHERE id=?", (task_id,))
     conn.commit()
     conn.close()
+
+@app.post("/api/tasks/move-workspace")
+def move_tasks_workspace(body: MoveWorkspaceRequest,
+                         session: str = Depends(require_auth)):
+    if body.workspace not in WORKSPACES:
+        raise HTTPException(400, "Espace de travail inconnu")
+    conn = get_db()
+    moved_ids: list[int] = []
+    dropped_category = 0
+    source_stacks: set[str] = set()
+    for tid in body.task_ids:
+        row = conn.execute("SELECT * FROM tasks WHERE id=?", (tid,)).fetchone()
+        if not row or row["workspace"] == body.workspace:
+            continue
+        # Place at the end of the same column in the target workspace
+        mp = conn.execute(
+            "SELECT COALESCE(MAX(position),0) FROM tasks WHERE column=? AND workspace=?",
+            (row["column"], body.workspace),
+        ).fetchone()[0]
+        # Categories are workspace-scoped: keep the label only if it exists there
+        cat = row["category"] or ""
+        if cat and not conn.execute(
+            "SELECT 1 FROM categories WHERE name=? AND workspace=?", (cat, body.workspace)
+        ).fetchone():
+            cat = ""
+            dropped_category += 1
+        if row["stack_id"]:
+            source_stacks.add(row["stack_id"])
+        conn.execute(
+            "UPDATE tasks SET workspace=?, position=?, category=?, stack_id=NULL, stack_pos=0 "
+            "WHERE id=?",
+            (body.workspace, mp + 1, cat, tid),
+        )
+        moved_ids.append(tid)
+    # Cross-workspace dependencies are not allowed: drop any link touching a moved task
+    if moved_ids:
+        ph = ",".join("?" * len(moved_ids))
+        conn.execute(
+            f"DELETE FROM task_dependencies "
+            f"WHERE task_id IN ({ph}) OR depends_on_id IN ({ph})",
+            moved_ids + moved_ids,
+        )
+    # Dissolve source stacks that are left with fewer than 2 members
+    for sid in source_stacks:
+        remaining = conn.execute(
+            "SELECT id FROM tasks WHERE stack_id=? AND archived=0", (sid,)
+        ).fetchall()
+        if len(remaining) < 2:
+            for r in remaining:
+                conn.execute(
+                    "UPDATE tasks SET stack_id=NULL, stack_pos=0 WHERE id=?", (r["id"],)
+                )
+    conn.commit()
+    conn.close()
+    return {"ok": True, "moved": len(moved_ids), "dropped_category": dropped_category}
 
 # ─── WIP LIMITS ───────────────────────────────────────────────────────────────
 @app.get("/api/wip_limits")

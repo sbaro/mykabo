@@ -12,6 +12,7 @@ A self-hosted, single-user Kanban board for personal task management. Lightweigh
 - **Task stacking**: group related cards into a single representative card
 - **Task dependencies**: mark a task as "blocked by" one or more others; cards show a lock until every prerequisite is Done (circular dependencies are rejected server-side)
 - **Block/unblock system**: mark tasks as blocked with a reason; status changes are automatically logged as comments
+- **Checklists**: sub-tasks per card — click the text to rename inline, drag the handle to reorder; ticking one logs a comment automatically
 - **Comments**: free-form notes plus automatic system notifications
 - **Archive**: completed or discarded tasks can be archived and restored
 - **WIP limits**: set work-in-progress limits per column

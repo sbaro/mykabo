@@ -330,6 +330,9 @@ class ChecklistItemUpdate(BaseModel):
     checked:  Optional[int] = None
     position: Optional[int] = None
 
+class ChecklistReorder(BaseModel):
+    item_ids: list[int]   # full list of item ids in their new order
+
 class DependencyUpdate(BaseModel):
     depends_on: list[int] = []
 
@@ -950,7 +953,14 @@ def update_checklist_item(task_id: int, item_id: int, body: ChecklistItemUpdate,
         raise HTTPException(404, "Checklist item not found")
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     if "text" in fields:
-        fields["text"] = fields["text"].strip() or fields.pop("text")
+        text = fields["text"].strip()
+        if not text:
+            conn.close()
+            raise HTTPException(400, "Le texte de la sous-tâche ne peut pas être vide.")
+        if len(text) > 200:
+            conn.close()
+            raise HTTPException(400, "Texte trop long (200 caractères max).")
+        fields["text"] = text
     was_checked = bool(row["checked"])
     now_checked = bool(fields.get("checked", was_checked))
     if fields:
@@ -968,6 +978,38 @@ def update_checklist_item(task_id: int, item_id: int, body: ChecklistItemUpdate,
     row = conn.execute("SELECT * FROM checklist_items WHERE id=?", (item_id,)).fetchone()
     conn.close()
     return row_to_dict(row)
+
+@app.put("/api/tasks/{task_id}/checklist/reorder")
+def reorder_checklist(task_id: int, body: ChecklistReorder,
+                      session: str = Depends(require_auth)):
+    conn = get_db()
+    if not conn.execute("SELECT id FROM tasks WHERE id=?", (task_id,)).fetchone():
+        conn.close()
+        raise HTTPException(404, "Task not found")
+    owned = {r["id"] for r in conn.execute(
+        "SELECT id FROM checklist_items WHERE task_id=?", (task_id,)
+    ).fetchall()}
+    # Apply the requested order, ignoring ids that don't belong to this task.
+    # Any item omitted from the payload keeps its relative order at the end.
+    seen: set[int] = set()
+    pos = 0
+    for iid in body.item_ids:
+        if iid not in owned or iid in seen:
+            continue
+        seen.add(iid)
+        pos += 1
+        conn.execute("UPDATE checklist_items SET position=? WHERE id=?", (pos, iid))
+    for iid in [r["id"] for r in conn.execute(
+        "SELECT id FROM checklist_items WHERE task_id=? ORDER BY position, id", (task_id,)
+    ).fetchall() if r["id"] not in seen]:
+        pos += 1
+        conn.execute("UPDATE checklist_items SET position=? WHERE id=?", (pos, iid))
+    conn.commit()
+    rows = conn.execute(
+        "SELECT * FROM checklist_items WHERE task_id=? ORDER BY position, id", (task_id,)
+    ).fetchall()
+    conn.close()
+    return [row_to_dict(r) for r in rows]
 
 @app.delete("/api/tasks/{task_id}/checklist/{item_id}", status_code=204)
 def delete_checklist_item(task_id: int, item_id: int,

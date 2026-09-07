@@ -698,6 +698,33 @@ def unarchive_task(task_id: int, session: str = Depends(require_auth)):
     conn.close()
     return {"ok": True}
 
+@app.post("/api/tasks/{task_id}/move-top")
+def move_task_to_top(task_id: int, session: str = Depends(require_auth)):
+    """Send a card (or its whole stack) to the top of its column."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT column, workspace, stack_id, archived FROM tasks WHERE id=?", (task_id,)
+    ).fetchone()
+    if not row or row["archived"]:
+        conn.close()
+        raise HTTPException(404, "Task not found")
+    min_pos = conn.execute(
+        "SELECT COALESCE(MIN(position),0) FROM tasks "
+        "WHERE column=? AND workspace=? AND archived=0",
+        (row["column"], row["workspace"]),
+    ).fetchone()[0]
+    # Ordering is relative, so one below the current minimum is enough.
+    # Stacked cards share a single position, so the stack moves as one unit.
+    new_pos = min_pos - 1
+    if row["stack_id"]:
+        conn.execute("UPDATE tasks SET position=? WHERE stack_id=?",
+                     (new_pos, row["stack_id"]))
+    else:
+        conn.execute("UPDATE tasks SET position=? WHERE id=?", (new_pos, task_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "position": new_pos}
+
 @app.delete("/api/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int, session: str = Depends(require_auth)):
     conn = get_db()

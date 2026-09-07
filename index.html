@@ -1082,7 +1082,9 @@ function renderBoard(){
     const body=el.querySelector(".col-body");
     const lead=document.createElement("div"); lead.className="drop-indicator"; body.appendChild(lead);
     visibleReps.forEach(t=>{
-      const frag = t.stack_id ? makeStackCard(t,col.id) : makeCard(t,col.id);
+      // Compare against the unfiltered order so the flag reflects the real top
+      const isTop=activeReps.length>0&&activeReps[0].id===t.id;
+      const frag = t.stack_id ? makeStackCard(t,col.id,isTop) : makeCard(t,col.id,isTop);
       if(filterActive&&dimMode&&!taskOrStackMatches(t)){
         const wrapper=frag.querySelector(".stack-wrapper");
         if(wrapper)wrapper.classList.add("filtered-out");
@@ -1348,7 +1350,7 @@ function depTag(t){
     return `<span class="tag dep-blocked" title="Bloquée par ${d.open} tâche(s) non terminée(s)">🔒 ${d.open}/${d.total}</span>`;
   return `<span class="tag dep-tag" title="${d.total} dépendance(s), toutes terminées">🔗 ${d.total} ✓</span>`;
 }
-function makeCard(t,colId){
+function makeCard(t,colId,isTop){
   const card=document.createElement("div");
   card.className="card"+(selectedIds.has(t.id)?" selected":"");
   card.draggable=!selectMode; card.dataset.id=t.id; card.dataset.pos=String(t.position??0);
@@ -1369,6 +1371,7 @@ function makeCard(t,colId){
     <div class="card-check">${selectedIds.has(t.id)?"✓":""}</div>
     <div class="card-top"><div class="card-title">${esc(t.title)}</div>
       <div class="card-actions">
+        ${isTop?"":`<button title="Remonter en haut de la colonne" onclick="moveTaskToTop(event,${t.id})">⬆️</button>`}
         ${promoteLabel?`<button title="→ ${promoteLabel}" onclick="promoteTask(event,${t.id},'${t.column||colId}')">${PROMOTE_ICON[t.column||colId]||"→"}</button>`:""}
         ${canArchive?`<button title="Archiver" onclick="quickArchive(event,${t.id})">🗄️</button>`:""}
         <button title="Modifier" onclick="openEdit(${t.id})">✏️</button>
@@ -1393,7 +1396,7 @@ function makeCard(t,colId){
   const frag=document.createDocumentFragment(); frag.appendChild(card); frag.appendChild(ind); return frag;
 }
 
-function makeStackCard(t,colId){
+function makeStackCard(t,colId,isTop){
   const stackId=t.stack_id, count=countStack(stackId);
   const wrapper=document.createElement("div"); wrapper.className="stack-wrapper"; wrapper.dataset.stackId=stackId;
   const card=document.createElement("div");
@@ -1412,6 +1415,7 @@ function makeStackCard(t,colId){
     <div class="card-check">${selectedIds.has(t.id)?"✓":""}</div>
     <div class="card-top"><div class="card-title">${esc(t.title)}</div>
       <div class="card-actions">
+        ${isTop?"":`<button title="Remonter la pile en haut de la colonne" onclick="moveTaskToTop(event,${t.id})">⬆️</button>`}
         ${promoteLabelS?`<button title="→ ${promoteLabelS}" onclick="promoteStack(event,'${stackId}','${t.column||colId}')">${PROMOTE_ICON[t.column||colId]||"→"}</button>`:""}
         ${canArchive?`<button title="Archiver la pile" onclick="quickArchiveStack(event,'${stackId}')">🗄️</button>`:""}
         <button title="Modifier" onclick="openEdit(${t.id})">✏️</button>
@@ -1440,6 +1444,11 @@ function makeStackCard(t,colId){
   const frag=document.createDocumentFragment(); frag.appendChild(wrapper); frag.appendChild(ind); return frag;
 }
 
+async function moveTaskToTop(e,id){
+  e.stopPropagation();
+  try{await api.post(`/api/tasks/${id}/move-top`,{});await loadBoard();}
+  catch(err){if(err.message!=="unauth")toast("Impossible de remonter la tâche.",true);}
+}
 async function quickArchive(e,id){e.stopPropagation();if(!confirm("Archiver ?"))return;try{const r=await api.post(`/api/tasks/${id}/archive`,{});if(r.next_task)toast("♻️ Nouvelle occurrence créée dans le backlog.");await loadBoard();}catch(err){if(err.message!=="unauth")toast("Erreur lors de l'archivage.",true);}}
 async function quickArchiveStack(e,stackId){
   e.stopPropagation();

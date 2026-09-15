@@ -22,11 +22,11 @@
   .hdr-btn:hover{background:rgba(255,255,255,.22);}
   .hdr-btn.active{background:var(--accent);}
   /* Workspace (perso/pro) segmented toggle */
-  .ws-toggle{display:none;background:rgba(0,0,0,.22);border-radius:8px;padding:3px;gap:2px;}
-  .ws-toggle.visible{display:inline-flex;}
-  .ws-toggle button{background:none;border:none;color:rgba(255,255,255,.7);border-radius:6px;padding:5px 13px;cursor:pointer;font-size:.8rem;font-weight:600;font-family:var(--font);display:flex;align-items:center;gap:5px;transition:background .15s,color .15s;white-space:nowrap;}
-  .ws-toggle button:hover{color:#fff;}
-  .ws-toggle button.active{background:#fff;color:var(--col-header);box-shadow:0 1px 3px rgba(0,0,0,.2);}
+  .ws-toggle,.view-toggle{display:none;background:rgba(0,0,0,.22);border-radius:8px;padding:3px;gap:2px;}
+  .ws-toggle.visible,.view-toggle.visible{display:inline-flex;}
+  .ws-toggle button,.view-toggle button{background:none;border:none;color:rgba(255,255,255,.7);border-radius:6px;padding:5px 13px;cursor:pointer;font-size:.8rem;font-weight:600;font-family:var(--font);display:flex;align-items:center;gap:5px;transition:background .15s,color .15s;white-space:nowrap;}
+  .ws-toggle button:hover,.view-toggle button:hover{color:#fff;}
+  .ws-toggle button.active,.view-toggle button.active{background:#fff;color:var(--col-header);box-shadow:0 1px 3px rgba(0,0,0,.2);}
   /* toast */
   #toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#18181b;color:#fff;border-radius:10px;padding:10px 20px;font-size:.85rem;z-index:500;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -304,7 +304,60 @@
   .category-add button:hover{background:#4f46e5;}
   .cat-empty{font-size:.85rem;color:var(--muted);text-align:center;margin:24px 0 12px;font-style:italic;}
   .cat-hint{font-size:.72rem;color:var(--muted);margin-top:14px;line-height:1.45;}
+  /* ── Table view ─────────────────────────────────────────────────────────── */
+  .table-view{display:none;padding:20px 24px 60px;}
+  .table-view.visible{display:block;}
+  .tv-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;}
+  .tv-bar select{padding:6px 10px;border:1.5px solid #e4e4e7;border-radius:7px;font-size:.82rem;font-family:var(--font);background:#fff;outline:none;cursor:pointer;}
+  .tv-bar select:focus{border-color:var(--accent);}
+  .tv-count{font-size:.8rem;color:var(--muted);}
+  .tv-spacer{margin-left:auto;}
+  .tv-btn{background:#fff;border:1.5px solid #e4e4e7;border-radius:7px;padding:6px 12px;cursor:pointer;font-size:.8rem;font-family:var(--font);display:inline-flex;align-items:center;gap:5px;transition:border .15s,color .15s;}
+  .tv-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .tv-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+  .tv-btn.primary:hover{background:#4f46e5;color:#fff;}
+  /* The wrapper is the scroll container in both axes, so the sticky header
+     anchors to it (top:0) instead of drifting inside the table box. */
+  .tv-wrap{background:#fff;border:1px solid #e4e4e7;border-radius:var(--radius);overflow:auto;box-shadow:var(--shadow);max-height:calc(100vh - 188px);min-height:160px;}
+  /* Separate borders (with zero spacing) keep the sticky header's own
+     border-bottom painted while scrolling; collapsed borders don't travel
+     with the sticky cell. */
+  table.tv-table{width:100%;border-collapse:separate;border-spacing:0;font-size:.82rem;min-width:900px;}
+  .tv-table thead th{position:sticky;top:0;z-index:20;background:#f4f4f5;text-align:left;font-weight:700;font-size:.72rem;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);padding:9px 10px;border-bottom:1px solid #e4e4e7;white-space:nowrap;}
+  .tv-table thead th.sortable{cursor:pointer;user-select:none;}
+  .tv-table thead th.sortable:hover{color:var(--accent);}
+  .tv-table thead th .arrow{opacity:.45;font-size:.7rem;}
+  .tv-table thead th.sorted{color:var(--accent);}
+  .tv-table thead th.sorted .arrow{opacity:1;}
+  .tv-table tbody td{padding:7px 10px;border-bottom:1px solid #f4f4f5;vertical-align:middle;}
+  .tv-table tbody tr:hover{background:#fafafa;}
+  .tv-table tbody tr.tv-selected{background:#eef2ff;}
+  .tv-table tbody tr.tv-dragging{opacity:.4;}
+  .tv-table tbody tr.tv-over td{border-top:2px solid var(--accent);}
+  .tv-swatch{display:inline-block;width:10px;height:10px;border-radius:3px;flex-shrink:0;border:1px solid rgba(0,0,0,.15);}
+  .tv-title-cell{display:flex;align-items:center;gap:7px;min-width:0;}
+  .tv-title{cursor:text;border-radius:4px;padding:2px 5px;margin:-2px -5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tv-title:hover{background:#f4f4f5;}
+  .tv-title-edit{flex:1;min-width:0;font-size:.82rem;font-family:var(--font);padding:3px 6px;border:1.5px solid var(--accent);border-radius:5px;outline:none;}
+  .tv-handle{cursor:grab;color:#d4d4d8;font-size:.85rem;line-height:1;user-select:none;padding:0 2px;}
+  .tv-handle:active{cursor:grabbing;}
+  .tv-handle.disabled{opacity:.25;cursor:not-allowed;}
+  .tv-table select,.tv-table input[type=date]{border:1px solid transparent;border-radius:6px;padding:4px 6px;font-size:.78rem;font-family:var(--font);background:transparent;outline:none;cursor:pointer;max-width:140px;}
+  .tv-table select:hover,.tv-table input[type=date]:hover{border-color:#e4e4e7;background:#fff;}
+  .tv-table select:focus,.tv-table input[type=date]:focus{border-color:var(--accent);background:#fff;}
+  .tv-table input[type=date].overdue{color:var(--danger);font-weight:600;}
+  .tv-actions{display:flex;gap:2px;justify-content:flex-end;white-space:nowrap;}
+  .tv-actions button{background:none;border:none;cursor:pointer;font-size:.8rem;padding:3px 4px;border-radius:5px;opacity:.55;transition:opacity .15s,background .15s;}
+  .tv-table tbody tr:hover .tv-actions button{opacity:1;}
+  .tv-actions button:hover{background:#f4f4f5;}
+  .tv-chk{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;}
+  .tv-badge{display:inline-block;font-size:.68rem;padding:1px 6px;border-radius:99px;background:#f4f4f5;color:#52525b;white-space:nowrap;}
+  .tv-badge.stack{background:#ede9fe;color:#6d28d9;}
+  .tv-badge.dep{background:#fee2e2;color:#b91c1c;}
+  .tv-badge.snooze{background:#e0e7ff;color:#3730a3;}
+  .tv-empty{padding:40px 16px;text-align:center;color:var(--muted);font-size:.85rem;font-style:italic;}
   @media(max-width:600px){
+    .table-view{padding:12px;}.tv-wrap{max-height:calc(100vh - 150px);}
     .board{padding:12px;gap:12px;}.column{min-width:240px;width:240px;}
     header h1{font-size:1rem;}.side-drawer{max-width:100%;}
     .multi-toolbar{flex-wrap:wrap;justify-content:center;bottom:12px;width:calc(100% - 24px);}
@@ -328,6 +381,10 @@
   <div class="ws-toggle" id="ws-toggle">
     <button id="ws-perso" onclick="switchWorkspace('perso')" type="button">🏠 Perso</button>
     <button id="ws-pro"   onclick="switchWorkspace('pro')"   type="button">💼 Pro</button>
+  </div>
+  <div class="view-toggle" id="view-toggle">
+    <button id="view-board" onclick="switchView('board')" type="button" title="Vue Kanban">▦ Kanban</button>
+    <button id="view-table" onclick="switchView('table')" type="button" title="Vue tableau">▤ Tableau</button>
   </div>
   <div class="header-right">
     <span id="today"></span>
@@ -401,6 +458,25 @@
 </div>
 
 <div class="board" id="board"></div>
+
+<!-- Table view -->
+<div class="table-view" id="table-view">
+  <div class="tv-bar">
+    <label style="font-size:.8rem;color:var(--muted)">Colonne
+      <select id="tv-col" onchange="setTableCol(this.value)"></select>
+    </label>
+    <span class="tv-count" id="tv-count"></span>
+    <button class="tv-btn" id="tv-sort-reset" onclick="resetTableSort()" type="button" title="Revenir à l'ordre manuel">↕ Ordre manuel</button>
+    <div class="tv-spacer"></div>
+    <button class="tv-btn primary" onclick="openNew()" type="button">+ Ajouter une tâche</button>
+  </div>
+  <div class="tv-wrap">
+    <table class="tv-table">
+      <thead id="tv-head"></thead>
+      <tbody id="tv-body"></tbody>
+    </table>
+  </div>
+</div>
 
 <!-- Stack browse drawer -->
 <div class="side-panel" id="stack-panel">
@@ -607,6 +683,7 @@
       <tr><td><kbd>/</kbd></td><td>Rechercher</td></tr>
       <tr><td><kbd>F</kbd></td><td>Ouvrir / fermer les filtres</td></tr>
       <tr><td><kbd>S</kbd></td><td>Mode sélection</td></tr>
+      <tr><td><kbd>V</kbd></td><td>Basculer Kanban / Tableau</td></tr>
       <tr><td><kbd>Esc</kbd></td><td>Fermer la fenêtre active</td></tr>
       <tr><td><kbd>?</kbd></td><td>Afficher cette aide</td></tr>
     </table>
@@ -631,6 +708,18 @@ let browsingStackId=null;
 let stackHoverTarget=null;
 let stackDropTarget=null;   // mirrors stackHoverTarget but is NEVER cleared by dragleave
 let showSnoozed=false;
+
+// ── VIEW STATE (kanban board vs. table) ───────────────────────────────────────
+let currentView="board";            // "board" | "table"
+let tableCol="backlog";             // column shown in the table view
+let tableSort={key:"manual",dir:1}; // key: manual|title|priority|due_date|category|created_at
+try{
+  currentView=localStorage.getItem("mykabo.view")||"board";
+  tableCol=localStorage.getItem("mykabo.tableCol")||"backlog";
+}catch(_){}
+if(!COLS.some(c=>c.id===tableCol))tableCol="backlog";
+// Single entry point: every refresh goes through the active view's renderer
+function render(){refreshViewToggle();currentView==="table"?renderTable():renderBoard();}
 
 // ── FILTER STATE ──────────────────────────────────────────────────────────────────
 let activeFilters = { priority: new Set(), category: new Set() };
@@ -695,12 +784,14 @@ function showLogin(){
   document.getElementById("login-screen").classList.add("visible");
   document.getElementById("filter-bar").classList.add("hidden");
   document.getElementById("ws-toggle").classList.remove("visible");
+  document.getElementById("view-toggle").classList.remove("visible");
   ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","snooze-btn","export-btn","import-btn"].forEach(id=>document.getElementById(id).style.display="none");
 }
 function hideLogin(){
   document.getElementById("login-screen").classList.remove("visible");
   document.getElementById("filter-bar").classList.remove("hidden");
   document.getElementById("ws-toggle").classList.add("visible");
+  document.getElementById("view-toggle").classList.add("visible");
   ["logout-btn","archive-btn","categories-btn","select-mode-btn","account-btn","export-btn","import-btn"].forEach(id=>document.getElementById(id).style.display="inline-flex");
 }
 let activeWorkspace="perso";
@@ -746,7 +837,7 @@ async function logout(){await api.post("/api/logout",{});showLogin();document.ge
 
 // ── SELECT MODE ───────────────────────────────────────────────────────────────
 function toggleSelectMode(){if(selectMode)cancelSelectMode();else{selectMode=true;selectedIds.clear();document.getElementById("board").classList.add("select-mode");document.getElementById("select-mode-btn").classList.add("active");updateToolbar();}}
-function cancelSelectMode(){selectMode=false;selectedIds.clear();document.getElementById("board").classList.remove("select-mode");document.getElementById("select-mode-btn").classList.remove("active");document.querySelectorAll(".card.selected").forEach(c=>c.classList.remove("selected"));updateToolbar();}
+function cancelSelectMode(){selectMode=false;selectedIds.clear();document.getElementById("board").classList.remove("select-mode");document.getElementById("select-mode-btn").classList.remove("active");document.querySelectorAll(".card.selected").forEach(c=>c.classList.remove("selected"));updateToolbar();if(currentView==="table")renderTable();}
 function toggleCardSelect(id){
   if(selectedIds.has(id))selectedIds.delete(id);else selectedIds.add(id);
   const card=document.querySelector(`.card[data-id="${id}"]`);
@@ -973,7 +1064,7 @@ async function saveWipLimit(){
   try{
     wipLimits=await api.patch(`/api/wip_limits/${wipEditingCol}`,{max_tasks});
     closeWipModal();
-    renderBoard();
+    render();
   }catch(e){if(e.message!=="unauth")toast("Erreur lors de la sauvegarde de la limite.",true);}
 }
 
@@ -989,7 +1080,7 @@ async function loadBoard(){
       api.get("/api/tasks"),
       api.get("/api/wip_limits"),
     ]);
-    renderBoard();
+    render();
   }catch(e){
     if(e.message!=="unauth")toast("Impossible de charger le tableau.",true);
   }
@@ -1005,7 +1096,7 @@ function refreshSnoozeBtn(){
   const lbl=document.getElementById("snooze-label");
   if(lbl)lbl.textContent=showSnoozed?`Masquer (${count})`:`${count} masquée${count>1?"s":""}`;
 }
-function toggleShowSnoozed(){showSnoozed=!showSnoozed;renderBoard();}
+function toggleShowSnoozed(){showSnoozed=!showSnoozed;render();}
 
 async function promoteTask(e,id,fromCol){
   e.stopPropagation();
@@ -1103,6 +1194,262 @@ function renderBoard(){
   refreshSnoozeBtn();
 }
 
+// ── TABLE VIEW ────────────────────────────────────────────────────────────────
+const PRIO_RANK={high:0,normal:1,low:2};
+const PRIO_LABEL={high:"Haute",normal:"Normale",low:"Basse"};
+let tvDragId=null;
+
+function switchView(v){
+  if(v===currentView)return;
+  currentView=v;
+  try{localStorage.setItem("mykabo.view",v);}catch(_){}
+  render();
+}
+function refreshViewToggle(){
+  document.getElementById("view-board").classList.toggle("active",currentView==="board");
+  document.getElementById("view-table").classList.toggle("active",currentView==="table");
+  document.getElementById("board").style.display=currentView==="board"?"":"none";
+  document.getElementById("table-view").classList.toggle("visible",currentView==="table");
+}
+function setTableCol(c){
+  tableCol=c;
+  try{localStorage.setItem("mykabo.tableCol",c);}catch(_){}
+  renderTable();
+}
+function resetTableSort(){tableSort={key:"manual",dir:1};renderTable();}
+function sortTableBy(key){
+  if(tableSort.key===key)tableSort.dir=-tableSort.dir;
+  else tableSort={key,dir:1};
+  renderTable();
+}
+
+// A stack occupies a single slot in the manual order, exactly like on the board
+function columnUnits(colId){
+  const units=[], byStack=new Map();
+  for(const t of (tasks[colId]||[])){
+    if(!t.stack_id){units.push({ids:[t.id]});continue;}
+    const u=byStack.get(t.stack_id);
+    if(u){u.ids.push(t.id);continue;}
+    const nu={ids:[t.id]}; byStack.set(t.stack_id,nu); units.push(nu);
+  }
+  return units;
+}
+
+function tableRows(){
+  const today=new Date().toISOString().slice(0,10);
+  let rows=(tasks[tableCol]||[])
+    .filter(t=>showSnoozed||tableCol!=="backlog"||!t.snooze_until||t.snooze_until<=today)
+    .filter(matchesFilters);
+  const {key,dir}=tableSort;
+  if(key==="manual")return rows;
+  return [...rows].sort((a,b)=>{
+    let r=0;
+    if(key==="title")r=(a.title||"").localeCompare(b.title||"","fr",{sensitivity:"base"});
+    else if(key==="priority")r=(PRIO_RANK[a.priority]??9)-(PRIO_RANK[b.priority]??9);
+    else if(key==="category")r=(a.category||"").localeCompare(b.category||"","fr",{sensitivity:"base"});
+    else{
+      // Dates: blanks always sort last, whichever the direction
+      const av=a[key]||"", bv=b[key]||"";
+      if(!av&&!bv)r=0; else if(!av)return 1; else if(!bv)return -1;
+      else r=av<bv?-1:av>bv?1:0;
+    }
+    return r!==0?r*dir:(a.position??0)-(b.position??0);
+  });
+}
+
+function renderTable(){
+  refreshViewToggle();
+  const sel=document.getElementById("tv-col");
+  if(sel.options.length!==COLS.length)
+    sel.innerHTML=COLS.map(c=>`<option value="${c.id}">${c.label}</option>`).join("");
+  sel.value=tableCol;
+
+  const rows=tableRows(), total=(tasks[tableCol]||[]).length;
+  const manual=tableSort.key==="manual";
+  document.getElementById("tv-count").textContent =
+    rows.length===total?`${total} tâche${total>1?"s":""}`
+                       :`${rows.length} affichée${rows.length>1?"s":""} sur ${total}`;
+  document.getElementById("tv-sort-reset").style.display=manual?"none":"inline-flex";
+
+  const arrow=k=>tableSort.key===k?`<span class="arrow">${tableSort.dir>0?"▲":"▼"}</span>`:`<span class="arrow">↕</span>`;
+  const th=(k,label)=>`<th class="sortable${tableSort.key===k?" sorted":""}" onclick="sortTableBy('${k}')">${label} ${arrow(k)}</th>`;
+  const allChecked=rows.length>0&&rows.every(t=>selectedIds.has(t.id));
+  document.getElementById("tv-head").innerHTML=`<tr>
+    <th style="width:26px"></th>
+    <th style="width:26px"><input type="checkbox" class="tv-chk" id="tv-all" ${allChecked?"checked":""} title="Tout sélectionner"/></th>
+    ${th("title","Titre")}
+    ${th("priority","Priorité")}
+    ${th("category","Catégorie")}
+    ${th("due_date","Échéance")}
+    <th>Colonne</th>
+    <th>Infos</th>
+    ${th("created_at","Créée le")}
+    <th style="width:110px"></th>
+  </tr>`;
+
+  const body=document.getElementById("tv-body");
+  if(rows.length===0){
+    const msg=total===0?"Aucune tâche dans cette colonne."
+                       :"Aucune tâche ne correspond aux filtres.";
+    body.innerHTML=`<tr><td colspan="10"><div class="tv-empty">${msg}</div></td></tr>`;
+    refreshFilterBar(); refreshSnoozeBtn();
+    document.getElementById("tv-all").onchange=null;
+    return;
+  }
+  const today=new Date().toISOString().slice(0,10);
+  body.innerHTML=rows.map(t=>{
+    const overdue=t.due_date&&t.due_date<today&&t.column!=="done"&&t.column!=="abandoned";
+    const snoozed=t.snooze_until&&t.snooze_until>today;
+    const depOpen=t.deps?.open||0;
+    const cl=t.checklist_count;
+    const col=t.column||tableCol;
+    const canArchive=ARCHIVABLE.includes(col);
+    const promoteCol=PROMOTE_MAP[col];
+    const badges=[
+      t.stack_id?`<span class="tv-badge stack" title="Fait partie d'une pile de ${countStack(t.stack_id)}">📚 ×${countStack(t.stack_id)}</span>`:"",
+      depOpen>0?`<span class="tv-badge dep" title="${depOpen} prérequis non terminé${depOpen>1?"s":""}">🔒 ${depOpen}</span>`:"",
+      cl?.total>0?`<span class="tv-badge" title="Checklist">${cl.done}/${cl.total} ✓</span>`:"",
+      t.recurrence?`<span class="tv-badge" title="Tâche récurrente">♻️</span>`:"",
+      snoozed?`<span class="tv-badge snooze" title="Masquée jusqu'au ${t.snooze_until}">💤</span>`:"",
+    ].filter(Boolean).join(" ");
+    const created=t.created_at?String(t.created_at).slice(0,10):"";
+    return `<tr data-id="${t.id}" class="${selectedIds.has(t.id)?"tv-selected":""}">
+      <td><span class="tv-handle${manual?"":" disabled"}" title="${manual?"Glisser pour réordonner":"Réordonnancement possible en ordre manuel uniquement"}">⠿</span></td>
+      <td><input type="checkbox" class="tv-chk tv-row-chk" ${selectedIds.has(t.id)?"checked":""}/></td>
+      <td><div class="tv-title-cell">
+        <span class="tv-swatch" style="background:${esc(t.color||"#fef08a")}"></span>
+        <span class="tv-title" title="Cliquer pour renommer">${esc(t.title)}</span>
+      </div></td>
+      <td><select class="tv-prio">${["high","normal","low"].map(p=>`<option value="${p}"${t.priority===p?" selected":""}>${PRIO_LABEL[p]}</option>`).join("")}</select></td>
+      <td><select class="tv-cat"><option value=""${!t.category?" selected":""}>—</option>${categories.map(c=>`<option value="${esc(c.name)}"${t.category===c.name?" selected":""}>${esc(c.name)}</option>`).join("")}</select></td>
+      <td><input type="date" class="tv-due${overdue?" overdue":""}" value="${t.due_date||""}" title="${overdue?"En retard":""}"/></td>
+      <td><select class="tv-col-sel">${COLS.map(c=>`<option value="${c.id}"${col===c.id?" selected":""}>${c.label}</option>`).join("")}</select></td>
+      <td>${badges}</td>
+      <td style="color:var(--muted);white-space:nowrap">${created}</td>
+      <td><div class="tv-actions">
+        ${manual?`<button class="tv-top" title="Remonter en haut">⬆️</button>`:""}
+        ${promoteCol?`<button class="tv-promote" title="→ ${COLS.find(c=>c.id===promoteCol)?.label||promoteCol}">${PROMOTE_ICON[col]||"→"}</button>`:""}
+        <button class="tv-edit" title="Ouvrir la fiche">✏️</button>
+        ${canArchive?`<button class="tv-archive" title="Archiver">🗄️</button>`:""}
+      </div></td>
+    </tr>`;
+  }).join("");
+
+  // ── wire up rows ──
+  document.getElementById("tv-all").onchange=e=>tableToggleAll(e.target.checked);
+  body.querySelectorAll("tr[data-id]").forEach(tr=>{
+    const id=parseInt(tr.dataset.id);
+    const task=rows.find(t=>t.id===id);
+    tr.querySelector(".tv-row-chk").addEventListener("change",e=>tableToggleSelect(id,e.target.checked));
+    tr.querySelector(".tv-title").addEventListener("click",()=>startEditTableTitle(tr,task));
+    tr.querySelector(".tv-prio").addEventListener("change",e=>tablePatch(id,{priority:e.target.value}));
+    tr.querySelector(".tv-cat").addEventListener("change",e=>tablePatch(id,{category:e.target.value}));
+    tr.querySelector(".tv-due").addEventListener("change",e=>tablePatch(id,{due_date:e.target.value||""}));
+    tr.querySelector(".tv-col-sel").addEventListener("change",e=>tableSetColumn(id,e.target.value,task.column||tableCol));
+    tr.querySelector(".tv-edit").addEventListener("click",()=>openEdit(id));
+    tr.querySelector(".tv-top")?.addEventListener("click",e=>moveTaskToTop(e,id));
+    tr.querySelector(".tv-promote")?.addEventListener("click",e=>promoteTask(e,id,task.column||tableCol));
+    tr.querySelector(".tv-archive")?.addEventListener("click",e=>quickArchive(e,id));
+    if(!manual)return;
+    // Only the handle starts a drag, so the inline controls stay usable
+    const handle=tr.querySelector(".tv-handle");
+    handle.addEventListener("mousedown",()=>{tr.draggable=true;});
+    handle.addEventListener("mouseup",()=>{tr.draggable=false;});
+    tr.addEventListener("dragstart",e=>{
+      tvDragId=id; tr.classList.add("tv-dragging");
+      e.dataTransfer.effectAllowed="move";
+      try{e.dataTransfer.setData("text/plain",String(id));}catch(_){}
+    });
+    tr.addEventListener("dragend",()=>{
+      tvDragId=null; tr.draggable=false; tr.classList.remove("tv-dragging");
+      body.querySelectorAll(".tv-over").forEach(el=>el.classList.remove("tv-over"));
+    });
+    tr.addEventListener("dragover",e=>{
+      if(tvDragId===null||tvDragId===id)return;
+      e.preventDefault(); e.dataTransfer.dropEffect="move";
+      body.querySelectorAll(".tv-over").forEach(el=>el.classList.remove("tv-over"));
+      tr.classList.add("tv-over");
+    });
+    tr.addEventListener("dragleave",()=>tr.classList.remove("tv-over"));
+    tr.addEventListener("drop",e=>{
+      e.preventDefault(); tr.classList.remove("tv-over");
+      if(tvDragId!==null&&tvDragId!==id)tableReorder(tvDragId,id);
+    });
+  });
+  refreshFilterBar();
+  refreshSnoozeBtn();
+}
+
+function startEditTableTitle(tr,task){
+  if(tr.querySelector(".tv-title-edit"))return;
+  const span=tr.querySelector(".tv-title");
+  const inp=document.createElement("input");
+  inp.type="text"; inp.className="tv-title-edit"; inp.value=task.title; inp.maxLength=200;
+  let settled=false;
+  const cancel=()=>{if(settled)return;settled=true;inp.replaceWith(span);};
+  const commit=async()=>{
+    if(settled)return;
+    const title=inp.value.trim();
+    if(!title||title===task.title){cancel();return;}
+    settled=true;
+    await tablePatch(task.id,{title});
+  };
+  inp.addEventListener("keydown",e=>{
+    if(e.key==="Enter"){e.preventDefault();commit();}
+    else if(e.key==="Escape"){e.preventDefault();cancel();}
+    e.stopPropagation();
+  });
+  inp.addEventListener("blur",commit);
+  span.replaceWith(inp);
+  inp.focus(); inp.select();
+}
+
+async function tablePatch(id,body){
+  try{await api.patch(`/api/tasks/${id}`,body);}
+  catch(e){if(e.message!=="unauth")toast("Erreur lors de la modification.",true);}
+  await loadBoard();
+}
+async function tableSetColumn(id,newCol,fromCol){
+  if(newCol===fromCol)return;
+  try{
+    await api.patch(`/api/tasks/${id}`,{column:newCol});
+    // Mirror the board's block/unblock side-effects
+    if(newCol==="blocked"&&fromCol!=="blocked"){openBlockModal(id,fromCol);return;}
+    if(fromCol==="blocked"&&newCol!=="blocked")await handleUnblock(id,newCol);
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors du déplacement.",true);}
+  await loadBoard();
+}
+async function tableReorder(dragId,targetId){
+  const units=columnUnits(tableCol);
+  const di=units.findIndex(u=>u.ids.includes(dragId));
+  if(di<0)return;
+  const [moved]=units.splice(di,1);
+  let ti=units.findIndex(u=>u.ids.includes(targetId));
+  if(ti<0)ti=units.length;
+  units.splice(ti,0,moved);
+  try{
+    await Promise.all(units.flatMap((u,i)=>u.ids.map(id=>api.patch(`/api/tasks/${id}`,{position:i}))));
+  }catch(e){if(e.message!=="unauth")toast("Erreur lors du réordonnancement.",true);}
+  await loadBoard();
+}
+function _enterSelectMode(){
+  if(selectMode)return;
+  selectMode=true;
+  document.getElementById("board").classList.add("select-mode");
+  document.getElementById("select-mode-btn").classList.add("active");
+}
+function tableToggleSelect(id,checked){
+  if(checked){selectedIds.add(id);_enterSelectMode();}
+  else selectedIds.delete(id);
+  updateToolbar(); renderTable();
+}
+function tableToggleAll(checked){
+  const rows=tableRows();
+  if(checked){rows.forEach(t=>selectedIds.add(t.id));_enterSelectMode();}
+  else rows.forEach(t=>selectedIds.delete(t.id));
+  updateToolbar(); renderTable();
+}
+
 // ── FILTERING ─────────────────────────────────────────────────────────────────
 function matchesSearch(t){
   if(!searchQuery)return true;
@@ -1122,14 +1469,14 @@ function matchesFilters(t){
 function onSearchInput(v){
   searchQuery=v.trim();
   document.getElementById("search-clear-btn").classList.toggle("visible",searchQuery.length>0);
-  renderBoard();
+  render();
 }
 function clearSearch(){
   searchQuery="";
   const inp=document.getElementById("search-input");
   if(inp)inp.value="";
   document.getElementById("search-clear-btn").classList.remove("visible");
-  renderBoard();
+  render();
 }
 function taskOrStackMatches(t){
   if(!t.stack_id)return matchesFilters(t);
@@ -1138,7 +1485,7 @@ function taskOrStackMatches(t){
 function toggleFilter(group,value){
   if(activeFilters[group].has(value))activeFilters[group].delete(value);
   else activeFilters[group].add(value);
-  renderBoard();
+  render();
 }
 function clearAllFilters(){
   if(activeFilters.priority.size===0&&activeFilters.category.size===0&&!searchQuery)return;
@@ -1639,9 +1986,11 @@ function openNew(){
   if(selectMode)return; currentTaskId=null;
   document.getElementById("modal-title").textContent="Nouvelle tâche";
   document.getElementById("f-title").value=""; document.getElementById("f-desc").value="";
-  // Hide column selector for new tasks (always backlog) but set value explicitly
-  document.getElementById("f-col").value="backlog";
-  document.getElementById("col-field").style.display="none";
+  // New tasks default to the backlog; from the table view they land in the
+  // column being shown, so the selector is revealed when that isn't the backlog.
+  const presetCol=currentView==="table"?tableCol:"backlog";
+  document.getElementById("f-col").value=presetCol;
+  document.getElementById("col-field").style.display=presetCol==="backlog"?"none":"block";
   document.getElementById("f-priority").value="normal";
   populateCategorySelect(document.getElementById("f-category"),"");
   document.getElementById("f-due").value=""; document.getElementById("f-recurrence").value="";
@@ -2012,6 +2361,10 @@ document.addEventListener("keydown",e=>{
     case "s": case "S":
       e.preventDefault();
       toggleSelectMode();
+      break;
+    case "v": case "V":
+      e.preventDefault();
+      switchView(currentView==="board"?"table":"board");
       break;
     case "?":
       e.preventDefault();
